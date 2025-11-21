@@ -26,16 +26,29 @@ struct JoinResponse {
 
 // --- 2. Update State to store pending invites ---
 // We need to hold the "ResponseChannel" in memory while waiting for the user to click "Accept"
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AppRequest {
+    Join { username: String },
+    Ping, // New Heartbeat Request
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AppResponse {
+    Join { accepted: bool, content: Option<String> },
+    Pong, // New Heartbeat Response
+}
+
+// --- 2. Update State Type Definition ---
 struct PeerState {
     peers: Arc<Mutex<HashSet<String>>>,
-    // Map PeerId string -> ResponseChannel so we can reply later
-    pending_invites: Arc<Mutex<HashMap<String, request_response::ResponseChannel<JoinResponse>>>>,
+    // Update the channel type to use AppResponse
+    pending_invites: Arc<Mutex<HashMap<String, request_response::ResponseChannel<AppResponse>>>>,
 }
 
 #[derive(NetworkBehaviour)]
 struct MyBehaviour {
     mdns: mdns::tokio::Behaviour,
-    request_response: request_response::json::Behaviour<JoinRequest, JoinResponse>,
+    request_response: request_response::json::Behaviour<AppRequest, AppResponse>,
 }
 
 #[command]
@@ -109,10 +122,13 @@ fn respond_to_join(
 async fn start_p2p_node(
     app_handle: AppHandle, 
     peers_state: Arc<Mutex<HashSet<String>>>,
-    pending_invites: Arc<Mutex<HashMap<String, request_response::ResponseChannel<JoinResponse>>>>,
-    // In a real app, pass a Receiver here to handle commands from the frontend
-    mut cmd_rx: tokio::sync::mpsc::Receiver<(String, String)> // (Command, Payload)
+    pending_invites: Arc<Mutex<HashMap<String, request_response::ResponseChannel<AppResponse>>>>, // Updated Type
+    mut cmd_rx: tokio::sync::mpsc::Receiver<(String, String)>
 ) -> Result<(), Box<dyn std::error::Error>> {
+
+    // ... SwarmBuilder setup remains the same, just ensure MyBehaviour uses the new types ...
+    // Note: The compiler usually infers the types for MyBehaviour based on the struct definition, 
+    // so the builder code likely doesn't need changing if the struct definition is updated.
 
     let mut swarm = SwarmBuilder::with_new_identity()
         .with_tokio()
@@ -127,6 +143,7 @@ async fn start_p2p_node(
                 key.public().to_peer_id(),
             )?;
             
+            // Use the new Enums here implicitly via MyBehaviour
             let request_response = request_response::json::Behaviour::new(
                 [(StreamProtocol::new("/collab/1.0.0"), ProtocolSupport::Full)],
                 request_response::Config::default()
@@ -139,33 +156,48 @@ async fn start_p2p_node(
 
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
 
+    // STATE: Track who our Host is (if we are a Guest)
+    let mut current_host: Option<PeerId> = None;
+    
+    // TIMER: Heartbeat interval
+    let mut heartbeat = tokio::time::interval(Duration::from_secs(3));
+
     loop {
         tokio::select! {
-            // Handle commands from Frontend (via mpsc channel)
+            // 1. HEARTBEAT TICK
+            _ = heartbeat.tick() => {
+                if let Some(host_id) = current_host {
+                    // If we have a host, Ping them
+                    swarm.behaviour_mut().request_response.send_request(&host_id, AppRequest::Ping);
+                }
+            }
+
+            // 2. COMMANDS (Frontend -> Backend)
             Some((cmd, payload)) = cmd_rx.recv() => {
                 if cmd == "join" {
                     if let Ok(peer) = payload.parse::<PeerId>() {
                          swarm.behaviour_mut().request_response.send_request(
                              &peer, 
-                             JoinRequest { username: "Guest".into() } 
+                             AppRequest::Join { username: "Guest".into() } // Updated Enum usage
                          );
                     }
                 } else if cmd == "accept" {
-                     // payload is formatted as "PEER_ID|CONTENT"
                      if let Some((peer_str, content)) = payload.split_once('|') {
                          let mut pending = pending_invites.lock().unwrap();
                          if let Some(channel) = pending.remove(peer_str) {
                              let _ = swarm.behaviour_mut().request_response.send_response(
                                  channel,
-                                 JoinResponse { accepted: true, content: Some(content.to_string()) }
+                                 AppResponse::Join { accepted: true, content: Some(content.to_string()) } // Updated Enum usage
                              );
                          }
                      }
                 }
             }
             
+            // 3. SWARM EVENTS
             event = swarm.select_next_some() => {
                 match event {
+                    // ... mDNS events remain the same ...
                     SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
                         for (peer_id, _) in list {
                             peers_state.lock().unwrap().insert(peer_id.to_string());
@@ -178,34 +210,61 @@ async fn start_p2p_node(
                             let _ = app_handle.emit("peer-expired", peer_id.to_string());
                         }
                     },
-                    // --- Handle Incoming Join Request ---
+
+                    // --- INCOMING REQUESTS ---
                     SwarmEvent::Behaviour(MyBehaviourEvent::RequestResponse(request_response::Event::Message { 
                         peer, 
                         message: request_response::Message::Request { request, channel, .. },
                         ..
                     })) => {
-                        println!("Received request from {peer}: {:?}", request);
-                        
-                        // 1. Store the channel so we can reply later
-                        pending_invites.lock().unwrap().insert(peer.to_string(), channel);
-                        
-                        // 2. Notify Frontend to show "Accept/Reject" UI
-                        let _ = app_handle.emit("join-requested", peer.to_string());
+                        match request {
+                            AppRequest::Join { username } => {
+                                println!("Received Join Request from {}: {}", peer, username);
+                                pending_invites.lock().unwrap().insert(peer.to_string(), channel);
+                                let _ = app_handle.emit("join-requested", peer.to_string());
+                            },
+                            AppRequest::Ping => {
+                                // Immediately reply with Pong. 
+                                // No need to ask frontend, this is automatic.
+                                let _ = swarm.behaviour_mut().request_response.send_response(channel, AppResponse::Pong);
+                            }
+                        }
                     },
-                    // --- Handle Join Response (As Guest) ---
+
+                    // --- INCOMING RESPONSES ---
                     SwarmEvent::Behaviour(MyBehaviourEvent::RequestResponse(request_response::Event::Message { 
                         peer, 
                         message: request_response::Message::Response { response, .. },
                         ..
                     })) => {
-                        if response.accepted {
-                            println!("Join accepted by {peer}!");
-                            // Emit event with the content to load into the editor
-                            let _ = app_handle.emit("join-accepted", response.content.unwrap_or_default());
-                        } else {
-                            println!("Join rejected.");
+                        match response {
+                            AppResponse::Join { accepted, content } => {
+                                if accepted {
+                                    println!("Join accepted by {peer}!");
+                                    // Set our Host!
+                                    current_host = Some(peer); 
+                                    let _ = app_handle.emit("join-accepted", content.unwrap_or_default());
+                                }
+                            },
+                            AppResponse::Pong => {
+                                // Host is alive.
+                                // println!("Pong received from host {}", peer);
+                            }
                         }
                     },
+
+                    // --- DETECTION: OUTBOUND FAILURE (Host Disconnect) ---
+                    SwarmEvent::Behaviour(MyBehaviourEvent::RequestResponse(request_response::Event::OutboundFailure { 
+                        peer, error, ..
+                    })) => {
+                        // If the failure comes from our Host, they are gone.
+                        if Some(peer) == current_host {
+                            eprintln!("Host {} disconnected: {:?}", peer, error);
+                            current_host = None;
+                            let _ = app_handle.emit("host-disconnected", peer.to_string());
+                        }
+                    },
+
                     _ => {}
                 }
             }

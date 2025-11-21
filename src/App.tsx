@@ -42,11 +42,18 @@ function App() {
         setStatus("Joined session! Editing shared doc.");
     });
 
+    const unlistenHostDisconnected = listen<string>("host-disconnected", (event) => {
+        setStatus(`⚠ Host ${event.payload.slice(0, 8)} disconnected! Session ended.`);
+        setIsHost(true); // Reset to host mode or disable editing
+        setIncomingRequest(null);
+    });
+
     return () => {
       unlistenDiscovered.then((f) => f());
       unlistenExpired.then((f) => f());
       unlistenRequest.then((f) => f());
       unlistenAccepted.then((f) => f());
+      unlistenHostDisconnected.then((f) => f());
     };
   }, []);
 
