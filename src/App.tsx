@@ -3,11 +3,36 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
+import { listen } from "@tauri-apps/api/event";
 import "./App.css";
 
 function App() {
   const [filename, setFilename] = useState("notes.md");
   const [status, setStatus] = useState("");
+  const [peers, setPeers] = useState<string[]>([]);
+
+  useEffect(() => {
+    // 1. Fetch existing peers immediately on load
+    invoke<string[]>("get_peers").then((currentPeers) => {
+      setPeers((prev) => [...new Set([...prev, ...currentPeers])]);
+    });
+
+    // 2. Listen for new events
+    const unlistenDiscovered = listen<string>("peer-discovered", (event) => {
+      setPeers((prev) => [...new Set([...prev, event.payload])]);
+      setStatus(`Found peer: ${event.payload.slice(0, 8)}...`);
+    });
+
+    const unlistenExpired = listen<string>("peer-expired", (event) => {
+      setPeers((prev) => prev.filter((p) => p !== event.payload));
+      setStatus(`Lost peer: ${event.payload.slice(0, 8)}...`);
+    });
+
+    return () => {
+      unlistenDiscovered.then((f) => f());
+      unlistenExpired.then((f) => f());
+    };
+  }, []);
 
   // Initialize Tiptap Editor with Markdown support
   const editor = useEditor({
@@ -72,6 +97,8 @@ function App() {
       </div>
 
       <p className="status-bar">{status}</p>
+
+      <div className="status-bar">Peers: {peers.length}</div>
     </main>
   );
 }
