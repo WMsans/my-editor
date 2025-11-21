@@ -1,3 +1,5 @@
+code.hljs{color:#cdd6f4;background:#1e1e2e}code .hljs-keyword{color:#cba6f7}code .hljs-built_in{color:#f38ba8}code .hljs-type{color:#f9e2af}code .hljs-literal{color:#fab387}code .hljs-number{color:#fab387}code .hljs-operator{color:#89dceb}code .hljs-punctuation{color:#bac2de}code .hljs-property{color:#94e2d5}code .hljs-regexp{color:#f5c2e7}code .hljs-string{color:#a6e3a1}code .hljs-char.escape_{color:#a6e3a1}code .hljs-subst{color:#a6adc8}code .hljs-symbol{color:#f2cdcd}code .hljs-variable{color:#cba6f7}code .hljs-variable.language_{color:#cba6f7}code .hljs-variable.constant_{color:#fab387}code .hljs-title{color:#89b4fa}code .hljs-title.class_{color:#f9e2af}code .hljs-title.function_{color:#89b4fa}code .hljs-params{color:#cdd6f4}code .hljs-comment{color:#9399b2}code .hljs-doctag{color:#f38ba8}code .hljs-meta{color:#fab387}code .hljs-section{color:#89b4fa}code .hljs-tag{color:#94e2d5}code .hljs-name{color:#cba6f7}code .hljs-attr{color:#89b4fa}code .hljs-attribute{color:#a6e3a1}code .hljs-bullet{color:#94e2d5}code .hljs-code{color:#a6e3a1}code .hljs-emphasis{color:#f38ba8;font-style:italic}code .hljs-strong{color:#f38ba8;font-weight:bold}code .hljs-formula{color:#94e2d5}code .hljs-link{color:#74c7ec;font-style:italic}code .hljs-quote{color:#a6e3a1;font-style:italic}code .hljs-selector-tag{color:#f9e2af}code .hljs-selector-id{color:#89b4fa}code .hljs-selector-class{color:#94e2d5}code .hljs-selector-attr{color:#cba6f7}code .hljs-selector-pseudo{color:#94e2d5}code .hljs-template-tag{color:#f2cdcd}code .hljs-template-variable{color:#f2cdcd}code .hljs-addition{color:#a6e3a1;background:rgba(166,227,161,.15)}code .hljs-deletion{color:#f38ba8;background:rgba(243,139,168,.15)}
+
 .logo.vite:hover {
   filter: drop-shadow(0 0 2em #747bff);
 }
@@ -11,8 +13,8 @@
   line-height: 24px;
   font-weight: 400;
 
-  color: #0f0f0f;
-  background-color: #f6f6f6;
+  color: #cdd6f4;
+  background-color: #1e1e2e;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -48,12 +50,12 @@
 
 a {
   font-weight: 500;
-  color: #646cff;
+  color: #89b4fa;
   text-decoration: inherit;
 }
 
 a:hover {
-  color: #535bf2;
+  color: #b4befe;
 }
 
 h1 {
@@ -68,8 +70,8 @@ button {
   font-size: 1em;
   font-weight: 500;
   font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
+  color: #cdd6f4;
+  background-color: #181825;
   transition: border-color 0.25s;
   box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
 }
@@ -83,7 +85,7 @@ button:hover {
 }
 button:active {
   border-color: #396cd8;
-  background-color: #e8e8e8;
+  background-color: #313244;
 }
 
 input,
@@ -95,29 +97,9 @@ button {
   margin-right: 5px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #2f2f2f;
-  }
-
-  a:hover {
-    color: #24c8db;
-  }
-
-  input,
-  button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
-  }
-  button:active {
-    background-color: #0f0f0f69;
-  }
-}
-
 .editor-wrapper {
-  background: white;
-  border: 1px solid #ccc;
+  background: #11111b;
+  border: 1px solid #313244;
   border-radius: 8px;
   padding: 1rem;
   min-height: 300px;
@@ -133,6 +115,7 @@ button {
 .ProseMirror {
   outline: none;
   min-height: 280px;
+  color: #cdd6f4;
 }
 
 .ProseMirror > * + * {
@@ -147,5 +130,5 @@ button {
 .status-bar {
   margin-top: 1rem;
   font-size: 0.9em;
-  color: #666;
+  color: #a6adc8;
 }
