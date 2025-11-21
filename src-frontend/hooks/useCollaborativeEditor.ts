@@ -1,6 +1,8 @@
 import { useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Collaboration from "@tiptap/extension-collaboration";
+import { Markdown } from "@tiptap/markdown";
+import BubbleMenuExtension from "@tiptap/extension-bubble-menu"; // Import the extension
 import * as Y from "yjs";
 import { useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -15,6 +17,8 @@ export function useCollaborativeEditor() {
         history: false 
     }),
       Collaboration.configure({ document: ydoc }),
+      Markdown,
+      BubbleMenuExtension, // Register the extension here
     ],
     editorProps: { attributes: { class: "editor-content" } },
   });
