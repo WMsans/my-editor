@@ -2,34 +2,23 @@ import { useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Collaboration from "@tiptap/extension-collaboration";
 import { Markdown } from "@tiptap/markdown";
-import BubbleMenuExtension from "@tiptap/extension-bubble-menu"; 
+import BubbleMenuExtension from "@tiptap/extension-bubble-menu"; // Import the extension
 import * as Y from "yjs";
 import { useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
-
-// Import your new extension
-import { MarkdownLivePreview } from "../extensions/MarkdownLivePreview";
 
 export function useCollaborativeEditor() {
   const ydoc = useMemo(() => new Y.Doc(), []);
 
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({
-        // @ts-expect-error
-        history: false,
-        // DISABLE standard extensions that consume markdown syntax
-        bold: false,
-        heading: false, 
-      }),
-      // Add your Live Preview extension
-      MarkdownLivePreview, 
-      
+      StarterKit.configure({ 
+        // @ts-ignore
+        history: false 
+    }),
       Collaboration.configure({ document: ydoc }),
-      // Markdown extension is still useful for other things, 
-      // but primarily we rely on the text content now.
-      Markdown, 
-      BubbleMenuExtension,
+      Markdown,
+      BubbleMenuExtension, // Register the extension here
     ],
     editorProps: { attributes: { class: "editor-content" } },
   });

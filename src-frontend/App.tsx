@@ -40,20 +40,8 @@ function App() {
     try {
       const content = await invoke<string>("read_file_content", { path });
       
-      if (editor) {
-        // Fix: Load content as raw text paragraphs to support "Live Preview"
-        // We manually construct the JSON to avoid the Markdown parser consuming syntax.
-        const lines = content.split("\n");
-        const docContent = lines.map(line => ({
-          type: "paragraph",
-          content: line ? [{ type: "text", text: line }] : []
-        }));
-
-        editor.commands.setContent({
-          type: "doc",
-          content: docContent
-        });
-      }
+      // Parse as Markdown
+      editor?.commands.setContent(content, { contentType: 'markdown' });
       
       setCurrentFilePath(path);
     } catch (e) {
@@ -88,9 +76,19 @@ function App() {
     try {
       if (!editor) return;
       
-      // Fix: Use getText with specific block separator to preserve raw markdown
-      // and avoid Tiptap adding double newlines by default.
-      const content = editor.getText({ blockSeparator: "\n" });
+      // Fix: The official @tiptap/markdown extension uses editor.getMarkdown()
+      // The community tiptap-markdown extension uses editor.storage.markdown.getMarkdown()
+      // We check for both to be safe.
+      let content = "";
+      
+      if (typeof (editor as any).getMarkdown === "function") {
+        content = (editor as any).getMarkdown();
+      } else if (editor.storage.markdown && typeof (editor.storage.markdown as any).getMarkdown === "function") {
+        content = (editor.storage.markdown as any).getMarkdown();
+      } else {
+         console.warn("Markdown serializer not found, falling back to text");
+         content = editor.getText(); 
+      }
 
       await invoke("write_file_content", { path, content });
       setFileSystemRefresh(prev => prev + 1);
