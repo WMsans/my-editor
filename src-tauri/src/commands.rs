@@ -144,6 +144,14 @@ pub fn write_file_content(path: String, content: String) -> Result<(), String> {
 }
 
 #[command]
+pub fn get_remote_origin(path: String) -> Result<String, String> {
+    let repo = Repository::open(&path).map_err(|e| e.to_string())?;
+    let remote = repo.find_remote("origin").map_err(|_| "No remote 'origin' found".to_string())?;
+    let url = remote.url().ok_or("Remote 'origin' has no URL")?;
+    Ok(url.to_string())
+}
+
+#[command]
 pub fn set_remote_origin(path: String, url: String) -> Result<String, String> {
     let repo = Repository::open(&path).map_err(|e| e.to_string())?;
     
@@ -158,29 +166,30 @@ pub fn set_remote_origin(path: String, url: String) -> Result<String, String> {
 
 #[command]
 pub fn push_changes(path: String, ssh_key_path: String) -> Result<String, String> {
-    let repo = Repository::open(&path).map_err(|e| e.to_string())?;
-    let mut remote = repo.find_remote("origin").map_err(|e| "No remote 'origin' found".to_string())?;
-
-    let mut callbacks = RemoteCallbacks::new();
-    callbacks.credentials(move |_url, username_from_url, _allowed_types| {
-        Cred::ssh_key(
-            username_from_url.unwrap_or("git"),
-            None,
-            std::path::Path::new(&ssh_key_path),
-            None,
-        )
-    });
-
-    let mut push_options = PushOptions::new();
-    push_options.remote_callbacks(callbacks);
-
-    // Determine current branch to push
-    let head = repo.head().map_err(|e| e.to_string())?;
-    let head_name = head.name().ok_or("HEAD is detached or invalid")?;
+    let mut cmd = std::process::Command::new("git");
+    cmd.current_dir(&path);
+    cmd.arg("push");
     
-    // Push HEAD to the same branch on remote
-    // Using refspec: e.g. "refs/heads/main"
-    remote.push(&[head_name], Some(&mut push_options)).map_err(|e| e.to_string())?;
+    // If the user provided a specific key path in UI, inject it.
+    // Otherwise, let git use ~/.ssh/config or ssh-agent.
+    if !ssh_key_path.trim().is_empty() {
+        // Use GIT_SSH_COMMAND to specify the key
+        // Note: This is safer than hoping the config matches.
+        #[cfg(target_os = "windows")]
+        let ssh_cmd = format!("ssh -i \"{}\"", ssh_key_path.replace("\\", "\\\\"));
+        #[cfg(not(target_os = "windows"))]
+        let ssh_cmd = format!("ssh -i \"{}\"", ssh_key_path);
+        
+        cmd.env("GIT_SSH_COMMAND", ssh_cmd);
+    }
 
-    Ok("Push successful".to_string())
+    let output = cmd.output().map_err(|e| format!("Failed to execute git command: {}", e))?;
+
+    if output.status.success() {
+        Ok("Push successful".to_string())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Err(format!("Git push failed:\nSTDERR: {}\nSTDOUT: {}", stderr, stdout))
+    }
 }

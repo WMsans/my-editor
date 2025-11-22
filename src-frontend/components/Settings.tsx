@@ -1,13 +1,11 @@
-import React, { useState, useEffect } from "react";
+import React from "react";
 
 interface SettingsProps {
   isOpen: boolean;
   onClose: () => void;
   sshKeyPath: string;
   setSshKeyPath: (path: string) => void;
-  remoteUrl: string;
-  setRemoteUrl: (url: string) => void;
-  onSaveRemote: () => void;
+  detectedRemote: string;
 }
 
 export const Settings: React.FC<SettingsProps> = ({
@@ -15,9 +13,7 @@ export const Settings: React.FC<SettingsProps> = ({
   onClose,
   sshKeyPath,
   setSshKeyPath,
-  remoteUrl,
-  setRemoteUrl,
-  onSaveRemote
+  detectedRemote
 }) => {
   if (!isOpen) return null;
 
@@ -38,16 +34,16 @@ export const Settings: React.FC<SettingsProps> = ({
         </div>
 
         <div className="setting-group">
-          <label>Remote Origin URL (Current Folder)</label>
-          <div className="row">
-            <input 
-              type="text" 
-              value={remoteUrl} 
-              onChange={(e) => setRemoteUrl(e.target.value)} 
-              placeholder="git@github.com:user/repo.git"
-            />
-            <button onClick={onSaveRemote}>Set Remote</button>
-          </div>
+          <label>SSH Private Key Path (Optional)</label> {/* Added Optional */}
+          <input 
+            type="text" 
+            value={sshKeyPath} 
+            onChange={(e) => setSshKeyPath(e.target.value)} 
+            placeholder="/Users/username/.ssh/id_rsa"
+          />
+          <small>
+            Leave empty to use <code>~/.ssh/config</code> or SSH Agent.
+          </small>
         </div>
 
         <div className="actions">
