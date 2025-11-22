@@ -9,13 +9,13 @@ pub struct FileSyncEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AppRequest {
     Join { username: String },
-    Sync { data: Vec<u8> },
+    // Added path to Sync request
+    Sync { path: String, data: Vec<u8> },
     Ping,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AppResponse {
-    // Content is now a serialized Vec<FileSyncEntry>
     Join { accepted: bool, content: Option<Vec<u8>> },
     Ack,
     Pong,
@@ -25,5 +25,6 @@ pub enum AppResponse {
 pub enum Payload {
     PeerId(String),
     JoinAccept { peer_id: String, content: Vec<u8> },
-    SyncData(Vec<u8>),
+    // Changed SyncData to struct variant with path
+    SyncData { path: String, data: Vec<u8> },
 }

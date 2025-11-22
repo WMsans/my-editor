@@ -3,14 +3,18 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import * as Y from "yjs";
 
-export function useP2P(ydoc: Y.Doc, onProjectReceived: (data: number[]) => void) {
+// Add currentFilePath to arguments
+export function useP2P(
+  ydoc: Y.Doc, 
+  currentFilePath: string | null, 
+  onProjectReceived: (data: number[]) => void
+) {
   const [peers, setPeers] = useState<string[]>([]);
   const [incomingRequest, setIncomingRequest] = useState<string | null>(null);
   const [isHost, setIsHost] = useState(true);
   const [status, setStatus] = useState("");
 
   useEffect(() => {
-    // Initial fetch
     invoke<string[]>("get_peers").then((current) => {
       setPeers((prev) => [...new Set([...prev, ...current])]);
     });
@@ -23,7 +27,6 @@ export function useP2P(ydoc: Y.Doc, onProjectReceived: (data: number[]) => void)
         setStatus(`Incoming request from ${e.payload.slice(0, 8)}...`);
       }),
       listen<number[]>("join-accepted", (e) => {
-        // Instead of applying Yjs update, we receive the project payload
         onProjectReceived(e.payload);
         setIsHost(false);
         setStatus("Joined session! Folder synced.");
@@ -32,15 +35,19 @@ export function useP2P(ydoc: Y.Doc, onProjectReceived: (data: number[]) => void)
         setStatus(`⚠ Host ${e.payload.slice(0, 8)} disconnected!`);
         setIsHost(true);
       }),
-      listen<number[]>("p2p-sync", (e) => {
-        Y.applyUpdate(ydoc, new Uint8Array(e.payload));
+      // Listen for structured Sync event
+      listen<{ path: string, data: number[] }>("p2p-sync", (e) => {
+        // Only apply update if we are looking at the same file
+        if (currentFilePath && e.payload.path === currentFilePath) {
+            Y.applyUpdate(ydoc, new Uint8Array(e.payload.data));
+        }
       })
     ];
 
     return () => {
       listeners.forEach((l) => l.then((unlisten) => unlisten()));
     };
-  }, [ydoc, onProjectReceived]);
+  }, [ydoc, onProjectReceived, currentFilePath]); // Re-bind when file changes
 
   const sendJoinRequest = async (peerId: string) => {
     try {
@@ -58,7 +65,6 @@ export function useP2P(ydoc: Y.Doc, onProjectReceived: (data: number[]) => void)
         return;
     }
     try {
-      // Send the Project Folder instead of just YDoc state
       await invoke("approve_join", {
         peerId: incomingRequest,
         projectPath: currentPath

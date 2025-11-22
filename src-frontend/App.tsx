@@ -15,11 +15,11 @@ import { SlashMenu } from "./components/SlashMenu";
 import "./App.css";
 
 function App() {
-  const { editor, ydoc } = useCollaborativeEditor();
-  
-  // State for folder management
   const [rootPath, setRootPath] = useState<string>("");
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
+  const { editor, ydoc } = useCollaborativeEditor(currentFilePath);
+  
+  // State for folder management
   const [fileSystemRefresh, setFileSystemRefresh] = useState(0);
   
   // Settings State
@@ -71,7 +71,7 @@ function App() {
     sendJoinRequest, 
     acceptRequest, 
     rejectRequest 
-  } = useP2P(ydoc, handleProjectReceived);
+  } = useP2P(ydoc, currentFilePath, handleProjectReceived);
 
   // -- Auto-detect Remote Logic --
   useEffect(() => {

@@ -17,7 +17,6 @@ pub struct FileEntry {
     is_dir: bool,
 }
 
-// --- Helper for Packing Directory ---
 fn visit_dirs(dir: &Path, base: &Path, cb: &mut Vec<FileSyncEntry>) -> std::io::Result<()> {
     if dir.is_dir() {
         for entry in fs::read_dir(dir)? {
@@ -25,7 +24,6 @@ fn visit_dirs(dir: &Path, base: &Path, cb: &mut Vec<FileSyncEntry>) -> std::io::
             let path = entry.path();
             let file_name = path.file_name().unwrap_or_default().to_string_lossy();
 
-            // Skip common heavy/ignored folders
             if file_name == ".git" || file_name == "node_modules" || file_name == "target" {
                 continue;
             }
@@ -33,7 +31,6 @@ fn visit_dirs(dir: &Path, base: &Path, cb: &mut Vec<FileSyncEntry>) -> std::io::
             if path.is_dir() {
                 visit_dirs(&path, base, cb)?;
             } else {
-                // Get relative path
                 if let Ok(relative) = path.strip_prefix(base) {
                     let relative_str = relative.to_string_lossy().replace("\\", "/");
                     let content = fs::read(&path)?;
@@ -48,7 +45,6 @@ fn visit_dirs(dir: &Path, base: &Path, cb: &mut Vec<FileSyncEntry>) -> std::io::
     Ok(())
 }
 
-// --- Commands ---
 #[command]
 pub fn get_peers(state: State<'_, PeerState>) -> Result<Vec<String>, String> {
     let peers = state.peers.lock().map_err(|e| e.to_string())?;
@@ -64,7 +60,6 @@ pub async fn request_join(
     tx.send(("join".to_string(), Payload::PeerId(peer_id))).await.map_err(|e| e.to_string())
 }
 
-// UPDATED: Now accepts project_path to pack the folder
 #[command]
 pub async fn approve_join(
     peer_id: String, 
@@ -78,14 +73,12 @@ pub async fn approve_join(
         visit_dirs(base_path, base_path, &mut files).map_err(|e| format!("Failed to pack project: {}", e))?;
     }
 
-    // Serialize the file list
     let content = serde_json::to_vec(&files).map_err(|e| e.to_string())?;
 
     let tx = sender.lock().await;
     tx.send(("accept".to_string(), Payload::JoinAccept { peer_id, content })).await.map_err(|e| e.to_string())
 }
 
-// NEW: Command to save the received project
 #[command]
 pub fn save_incoming_project(dest_path: String, data: Vec<u8>) -> Result<(), String> {
     let files: Vec<FileSyncEntry> = serde_json::from_slice(&data).map_err(|e| format!("Invalid project data: {}", e))?;
@@ -106,11 +99,12 @@ pub fn save_incoming_project(dest_path: String, data: Vec<u8>) -> Result<(), Str
 
 #[command]
 pub async fn broadcast_update(
+    path: String,
     data: Vec<u8>, 
     sender: SenderState<'_>
 ) -> Result<(), String> {
     let tx = sender.lock().await;
-    tx.send(("sync".to_string(), Payload::SyncData(data))).await.map_err(|e| e.to_string())
+    tx.send(("sync".to_string(), Payload::SyncData { path, data })).await.map_err(|e| e.to_string())
 }
 
 #[command]
@@ -161,7 +155,6 @@ pub fn init_git_repo(path: String) -> Result<String, String> {
 pub fn write_file_content(path: String, content: String) -> Result<(), String> {
     fs::write(&path, content).map_err(|e| e.to_string())?;
 
-    // Optional: Add simple auto-commit logic here if needed
     if let Ok(repo) = Repository::discover(&path) {
         let path_obj = Path::new(&path);
         if let Some(workdir) = repo.workdir() {
