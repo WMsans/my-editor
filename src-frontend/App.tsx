@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { EditorContent } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus" 
 import { useCollaborativeEditor } from "./hooks/useCollaborativeEditor";
@@ -7,8 +7,10 @@ import { PeerList } from "./components/PeerList";
 import { IncomingRequest } from "./components/IncomingRequest";
 import { FileExplorer } from "./components/FileExplorer";
 import { MenuBar } from "./components/MenuBar";
+import { Settings } from "./components/Settings";
 import { invoke } from "@tauri-apps/api/core";
-import { SlashMenu } from "./components/SlashMenu"; // Import the slash menu
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { SlashMenu } from "./components/SlashMenu"; 
 import "./App.css";
 
 function App() {
@@ -26,14 +28,69 @@ function App() {
   const [rootPath, setRootPath] = useState<string>("");
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
   const [fileSystemRefresh, setFileSystemRefresh] = useState(0);
+  
+  // Settings State
+  const [showSettings, setShowSettings] = useState(false);
+  const [sshKeyPath, setSshKeyPath] = useState(localStorage.getItem("sshKeyPath") || "");
+  const [remoteUrl, setRemoteUrl] = useState("");
 
-  // -- File Operations --
+  useEffect(() => {
+    localStorage.setItem("sshKeyPath", sshKeyPath);
+  }, [sshKeyPath]);
+
+  // -- Logic --
+
+  const pushChanges = async (path: string) => {
+    if (!sshKeyPath) {
+      console.log("No SSH key configured, skipping push");
+      return;
+    }
+    console.log("Pushing changes to remote...");
+    try {
+      const res = await invoke<string>("push_changes", { path, sshKeyPath: sshKeyPath });
+      console.log(res);
+    } catch (e) {
+      console.error("Push failed:", e);
+      // Optional: alert user
+      // alert("Push failed: " + e);
+    }
+  };
 
   const handleOpenFolder = async () => {
+    // Push changes for the *current* folder before switching
+    if (rootPath) {
+      await pushChanges(rootPath);
+    }
+
     const path = prompt("Enter absolute folder path to open:");
     if (path) {
       setRootPath(path);
       setFileSystemRefresh(prev => prev + 1);
+
+      // Initialize Git Repo
+      try {
+        await invoke<string>("init_git_repo", { path });
+      } catch (e) {
+        console.log("Git Init status:", e);
+      }
+    }
+  };
+
+  const handleQuit = async () => {
+    if (rootPath) {
+      // Push changes before quitting
+      await pushChanges(rootPath);
+    }
+    await getCurrentWindow().close();
+  };
+
+  const handleSaveRemote = async () => {
+    if (!rootPath) return alert("Open a folder first");
+    try {
+      await invoke("set_remote_origin", { path: rootPath, url: remoteUrl });
+      alert("Remote set successfully!");
+    } catch (e) {
+      alert("Failed to set remote: " + e);
     }
   };
 
@@ -41,20 +98,15 @@ function App() {
     try {
       const content = await invoke<string>("read_file_content", { path });
       
-      // Smart Load: Detect if it's our new JSON Block format or legacy Markdown
       try {
         const jsonContent = JSON.parse(content);
-        // Check if it looks like a Tiptap document (has type: 'doc')
         if (jsonContent.type === 'doc' && Array.isArray(jsonContent.content)) {
           editor?.commands.setContent(jsonContent);
-          console.log("Loaded as Block JSON");
         } else {
           throw new Error("Not a valid block document");
         }
       } catch (e) {
-        // Fallback to Markdown for standard text files
         editor?.commands.setContent(content, { contentType: 'markdown' });
-        console.log("Loaded as Markdown");
       }
       
       setCurrentFilePath(path);
@@ -77,10 +129,8 @@ function App() {
   };
 
   const handleSaveAs = async () => {
-    // Default to .json for the new system to preserve block data
     const defaultName = currentFilePath || (rootPath ? `${rootPath}/untitled.json` : "untitled.json");
-    const path = prompt("Enter full path to save file (use .json for full block support):", defaultName);
-    
+    const path = prompt("Enter full path to save file:", defaultName);
     if (path) {
       await saveToDisk(path);
       setCurrentFilePath(path);
@@ -90,28 +140,14 @@ function App() {
   const saveToDisk = async (path: string) => {
     try {
       if (!editor) return;
-      
       let content = "";
-      
-      // Smart Save: If the file ends in .json, save the full Block Structure.
-      // Otherwise, try to export to Markdown (blocks may be lost or simplified).
       if (path.endsWith(".json")) {
-        const json = editor.getJSON();
-        content = JSON.stringify(json, null, 2); // Pretty print for debuggability
+        content = JSON.stringify(editor.getJSON(), null, 2);
       } else {
-         // Markdown fallback
-         if (typeof (editor as any).getMarkdown === "function") {
-           content = (editor as any).getMarkdown();
-         } else if (editor.storage.markdown) {
-           content = (editor.storage.markdown as any).getMarkdown();
-         } else {
-            content = editor.getText(); 
-         }
+         content = editor.getText(); 
       }
-
       await invoke("write_file_content", { path, content });
       setFileSystemRefresh(prev => prev + 1);
-      // alert("Saved!"); // Optional: remove alert for smoother flow
     } catch (e) {
       alert("Error saving: " + e);
     }
@@ -124,11 +160,22 @@ function App() {
         onOpenFolder={handleOpenFolder}
         onSave={handleSave}
         onSaveAs={handleSaveAs}
+        onSettings={() => setShowSettings(true)}
+        onQuit={handleQuit}
         currentFile={currentFilePath}
       />
       
+      <Settings 
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        sshKeyPath={sshKeyPath}
+        setSshKeyPath={setSshKeyPath}
+        remoteUrl={remoteUrl}
+        setRemoteUrl={setRemoteUrl}
+        onSaveRemote={handleSaveRemote}
+      />
+
       <div className="main-workspace">
-        {/* Sidebar */}
         <aside className="sidebar">
            <FileExplorer 
              rootPath={rootPath} 
@@ -150,10 +197,8 @@ function App() {
            </div>
         </aside>
 
-        {/* Editor Area */}
         <main className="editor-container">
           <div className="editor-scroll-area">
-             {/* Insert the Slash Menu for Block Selection */}
              {editor && <SlashMenu editor={editor} />}
 
             {editor && (

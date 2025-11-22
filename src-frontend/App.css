@@ -177,7 +177,7 @@ body {
 }
 
 .ProseMirror p {
-  margin: 0.5em 0; /* Ensure paragraphs have spacing visually */
+  margin: 0.5em 0;
 }
 
 .editor-content {
@@ -215,7 +215,7 @@ body {
   color: #1e1e2e;
 }
 
-/* src-frontend/App.css updates */
+/* Simulation Block & Slash Menu */
 .simulation-block {
   border: 1px solid #45475a;
   border-radius: 6px;
@@ -242,7 +242,7 @@ body {
 .simulation-content textarea {
   flex: 1;
   background: #11111b;
-  color: #a6e3a1; /* Matrix green */
+  color: #a6e3a1;
   border: none;
   padding: 10px;
   font-family: monospace;
@@ -306,4 +306,74 @@ body {
 .slash-item small {
   color: #7f849c;
   font-size: 0.75rem;
+}
+
+/* Settings Modal */
+.settings-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.settings-modal {
+  background: #1e1e2e;
+  border: 1px solid #45475a;
+  padding: 20px;
+  border-radius: 8px;
+  width: 400px;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+}
+
+.settings-modal h3 {
+  margin-top: 0;
+}
+
+.setting-group {
+  margin-bottom: 15px;
+}
+
+.setting-group label {
+  display: block;
+  margin-bottom: 5px;
+  color: #a6adc8;
+  font-size: 0.9rem;
+}
+
+.setting-group input {
+  width: 100%;
+  padding: 8px;
+  background: #11111b;
+  border: 1px solid #313244;
+  color: white;
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+.setting-group small {
+  color: #6c7086;
+  font-size: 0.75rem;
+}
+
+.setting-group .row {
+  display: flex;
+  gap: 5px;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+.btn-close {
+  background: #313244;
+  border: none;
+  color: white;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
 }

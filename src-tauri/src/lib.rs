@@ -36,10 +36,12 @@ pub fn run() {
             commands::request_join,
             commands::approve_join,
             commands::broadcast_update,
-            // Register new commands
             commands::read_directory,
             commands::read_file_content,
-            commands::write_file_content
+            commands::write_file_content,
+            commands::init_git_repo,
+            commands::set_remote_origin, // <--- Added
+            commands::push_changes       // <--- Added
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
