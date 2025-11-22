@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { EditorContent } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus" 
 import { useCollaborativeEditor } from "./hooks/useCollaborativeEditor";
@@ -16,16 +16,8 @@ import "./App.css";
 
 function App() {
   const { editor, ydoc } = useCollaborativeEditor();
-  const { 
-    peers, 
-    incomingRequest, 
-    isHost, 
-    status, 
-    sendJoinRequest, 
-    acceptRequest, 
-    rejectRequest 
-  } = useP2P(ydoc);
-
+  
+  // State for folder management
   const [rootPath, setRootPath] = useState<string>("");
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
   const [fileSystemRefresh, setFileSystemRefresh] = useState(0);
@@ -39,7 +31,7 @@ function App() {
   const [warningMsg, setWarningMsg] = useState<string | null>(null);
   const [pendingQuit, setPendingQuit] = useState(false);
 
-  // Refs for usage inside event listeners
+  // Refs
   const rootPathRef = useRef(rootPath);
   const sshKeyPathRef = useRef(sshKeyPath);
 
@@ -51,6 +43,35 @@ function App() {
     sshKeyPathRef.current = sshKeyPath;
     localStorage.setItem("sshKeyPath", sshKeyPath);
   }, [sshKeyPath]);
+
+  // Define onProjectReceived logic before using it in useP2P
+  const handleProjectReceived = useCallback(async (data: number[]) => {
+    // Prompt user for destination
+    const destPath = prompt("You joined a session! Enter absolute path to clone the project folder:");
+    if (destPath) {
+      try {
+        await invoke("save_incoming_project", { destPath, data });
+        setRootPath(destPath);
+        setFileSystemRefresh(prev => prev + 1);
+        setDetectedRemote(""); // Reset for new project
+        alert(`Project cloned to ${destPath}`);
+      } catch (e) {
+        setWarningMsg("Failed to save incoming project: " + e);
+      }
+    } else {
+      setWarningMsg("Sync cancelled: No destination folder selected.");
+    }
+  }, []);
+
+  const { 
+    peers, 
+    incomingRequest, 
+    isHost, 
+    status, 
+    sendJoinRequest, 
+    acceptRequest, 
+    rejectRequest 
+  } = useP2P(ydoc, handleProjectReceived);
 
   // -- Auto-detect Remote Logic --
   useEffect(() => {
@@ -68,35 +89,24 @@ function App() {
       const currentRoot = rootPathRef.current;
       const currentSsh = sshKeyPathRef.current;
 
-      // If we haven't tried pushing yet and we have a root path
       if (currentRoot && !pendingQuit) {
-        event.preventDefault(); // Stop closing
-        
+        event.preventDefault(); 
         console.log("Window close requested. Attempting push...");
         try {
-          // Attempt Push
           if (!currentSsh) throw new Error("SSH Key path not set in Settings.");
           await invoke("push_changes", { path: currentRoot, sshKeyPath: currentSsh });
-          
-          // Success? Close for real.
           await win.destroy();
         } catch (e: any) {
-          // Fail? Show warning.
           setWarningMsg(`Failed to push changes before quitting:\n\n${e}\n\nQuit anyway?`);
-          setPendingQuit(true); // Allow the "Quit Anyway" button to work
+          setPendingQuit(true);
         }
-      }
-      // If pendingQuit is true, we let the user handle it via the modal (Quit Anyway)
-      // or if they clicked X again, we might want to block it again unless they force quit.
-      else if (pendingQuit) {
-         // If the modal is already open, prevent default to avoid accidental close if they spam X
-         // But generally we want the Modal buttons to drive action.
+      } else if (pendingQuit) {
          event.preventDefault();
       }
     });
 
     return () => { unlisten.then(f => f()); };
-  }, [pendingQuit]); // Re-bind if pendingQuit changes, though refs handle data
+  }, [pendingQuit]);
 
   // -- Logic --
 
@@ -110,14 +120,10 @@ function App() {
   };
 
   const handleOpenFolder = async () => {
-    // Push changes for the *current* folder before switching
     if (rootPath) {
       try {
         await pushChanges(rootPath);
       } catch (e) {
-        // If push fails, we show warning but allow user to continue via modal interaction logic if we wanted.
-        // For now, the warning pops up, but we still proceed to prompt? 
-        // Better: return and let user see warning.
         return; 
       }
     }
@@ -126,12 +132,10 @@ function App() {
     if (path) {
       setRootPath(path);
       setFileSystemRefresh(prev => prev + 1);
-      setDetectedRemote(""); // Reset
+      setDetectedRemote("");
 
-      // Initialize Git Repo
       try {
         await invoke<string>("init_git_repo", { path });
-        // Check remote immediately
         const remote = await invoke<string>("get_remote_origin", { path });
         setDetectedRemote(remote);
       } catch (e) {
@@ -142,7 +146,6 @@ function App() {
 
   const handleQuit = async () => {
     const win = getCurrentWindow();
-    // This triggers the onCloseRequested event we hooked above
     await win.close();
   };
 
@@ -250,7 +253,7 @@ function App() {
               {incomingRequest && (
                 <IncomingRequest 
                   peerId={incomingRequest} 
-                  onAccept={acceptRequest} 
+                  onAccept={() => acceptRequest(rootPath)} // Pass current rootPath
                   onReject={rejectRequest} 
                 />
               )}

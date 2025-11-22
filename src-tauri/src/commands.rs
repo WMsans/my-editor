@@ -1,7 +1,7 @@
 use tauri::{command, State};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use crate::protocol::Payload;
+use crate::protocol::{Payload, FileSyncEntry}; 
 use crate::state::PeerState;
 use std::fs;
 use std::path::Path;
@@ -17,7 +17,38 @@ pub struct FileEntry {
     is_dir: bool,
 }
 
-// --- Existing Commands ---
+// --- Helper for Packing Directory ---
+fn visit_dirs(dir: &Path, base: &Path, cb: &mut Vec<FileSyncEntry>) -> std::io::Result<()> {
+    if dir.is_dir() {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let file_name = path.file_name().unwrap_or_default().to_string_lossy();
+
+            // Skip common heavy/ignored folders
+            if file_name == ".git" || file_name == "node_modules" || file_name == "target" {
+                continue;
+            }
+
+            if path.is_dir() {
+                visit_dirs(&path, base, cb)?;
+            } else {
+                // Get relative path
+                if let Ok(relative) = path.strip_prefix(base) {
+                    let relative_str = relative.to_string_lossy().replace("\\", "/");
+                    let content = fs::read(&path)?;
+                    cb.push(FileSyncEntry {
+                        path: relative_str,
+                        content,
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+// --- Commands ---
 #[command]
 pub fn get_peers(state: State<'_, PeerState>) -> Result<Vec<String>, String> {
     let peers = state.peers.lock().map_err(|e| e.to_string())?;
@@ -33,14 +64,44 @@ pub async fn request_join(
     tx.send(("join".to_string(), Payload::PeerId(peer_id))).await.map_err(|e| e.to_string())
 }
 
+// UPDATED: Now accepts project_path to pack the folder
 #[command]
 pub async fn approve_join(
     peer_id: String, 
-    content: Vec<u8>, 
+    project_path: String, 
     sender: SenderState<'_>
 ) -> Result<(), String> {
+    let mut files = Vec::new();
+    let base_path = Path::new(&project_path);
+    
+    if base_path.exists() {
+        visit_dirs(base_path, base_path, &mut files).map_err(|e| format!("Failed to pack project: {}", e))?;
+    }
+
+    // Serialize the file list
+    let content = serde_json::to_vec(&files).map_err(|e| e.to_string())?;
+
     let tx = sender.lock().await;
     tx.send(("accept".to_string(), Payload::JoinAccept { peer_id, content })).await.map_err(|e| e.to_string())
+}
+
+// NEW: Command to save the received project
+#[command]
+pub fn save_incoming_project(dest_path: String, data: Vec<u8>) -> Result<(), String> {
+    let files: Vec<FileSyncEntry> = serde_json::from_slice(&data).map_err(|e| format!("Invalid project data: {}", e))?;
+    let root = Path::new(&dest_path);
+
+    fs::create_dir_all(root).map_err(|e| e.to_string())?;
+
+    for file in files {
+        let file_path = root.join(file.path);
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        fs::write(file_path, file.content).map_err(|e| e.to_string())?;
+    }
+    
+    Ok(())
 }
 
 #[command]
@@ -51,8 +112,6 @@ pub async fn broadcast_update(
     let tx = sender.lock().await;
     tx.send(("sync".to_string(), Payload::SyncData(data))).await.map_err(|e| e.to_string())
 }
-
-// --- File System & Git Commands ---
 
 #[command]
 pub fn read_directory(path: String) -> Result<Vec<FileEntry>, String> {
@@ -102,42 +161,16 @@ pub fn init_git_repo(path: String) -> Result<String, String> {
 pub fn write_file_content(path: String, content: String) -> Result<(), String> {
     fs::write(&path, content).map_err(|e| e.to_string())?;
 
+    // Optional: Add simple auto-commit logic here if needed
     if let Ok(repo) = Repository::discover(&path) {
         let path_obj = Path::new(&path);
-        let workdir = repo.workdir().ok_or("No working directory found")?;
-        let relative_path = path_obj.strip_prefix(workdir).map_err(|e| e.to_string())?;
-
-        let mut index = repo.index().map_err(|e| e.to_string())?;
-        index.add_path(relative_path).map_err(|e| format!("Git add failed: {}", e))?;
-        index.write().map_err(|e| e.to_string())?;
-
-        let oid = index.write_tree().map_err(|e| e.to_string())?;
-        let tree = repo.find_tree(oid).map_err(|e| e.to_string())?;
-        
-        let signature = Signature::now("Collaborative Editor", "user@local")
-            .map_err(|e| e.to_string())?;
-
-        let parent_commit = match repo.head() {
-            Ok(head) => {
-                let target = head.target().ok_or("HEAD has no target")?;
-                Some(repo.find_commit(target).map_err(|e| e.to_string())?)
-            },
-            Err(_) => None,
-        };
-
-        let parents = match parent_commit {
-            Some(ref c) => vec![c],
-            None => vec![],
-        };
-
-        repo.commit(
-            Some("HEAD"),
-            &signature,
-            &signature,
-            &format!("Auto-save: {}", relative_path.display()),
-            &tree,
-            &parents,
-        ).map_err(|e| format!("Git commit failed: {}", e))?;
+        if let Some(workdir) = repo.workdir() {
+            if let Ok(relative_path) = path_obj.strip_prefix(workdir) {
+                 let mut index = repo.index().map_err(|e| e.to_string())?;
+                 index.add_path(relative_path).map_err(|_| "Failed to add path")?;
+                 index.write().ok();
+            }
+        }
     }
 
     Ok(())
@@ -154,8 +187,6 @@ pub fn get_remote_origin(path: String) -> Result<String, String> {
 #[command]
 pub fn set_remote_origin(path: String, url: String) -> Result<String, String> {
     let repo = Repository::open(&path).map_err(|e| e.to_string())?;
-    
-    // Remove existing 'origin' if it exists to replace it, or just set url
     if repo.find_remote("origin").is_ok() {
         repo.remote_set_url("origin", &url).map_err(|e| e.to_string())?;
     } else {
@@ -170,26 +201,19 @@ pub fn push_changes(path: String, ssh_key_path: String) -> Result<String, String
     cmd.current_dir(&path);
     cmd.arg("push");
     
-    // If the user provided a specific key path in UI, inject it.
-    // Otherwise, let git use ~/.ssh/config or ssh-agent.
     if !ssh_key_path.trim().is_empty() {
-        // Use GIT_SSH_COMMAND to specify the key
-        // Note: This is safer than hoping the config matches.
         #[cfg(target_os = "windows")]
         let ssh_cmd = format!("ssh -i \"{}\"", ssh_key_path.replace("\\", "\\\\"));
         #[cfg(not(target_os = "windows"))]
         let ssh_cmd = format!("ssh -i \"{}\"", ssh_key_path);
-        
         cmd.env("GIT_SSH_COMMAND", ssh_cmd);
     }
 
-    let output = cmd.output().map_err(|e| format!("Failed to execute git command: {}", e))?;
+    let output = cmd.output().map_err(|e| format!("Git command failed: {}", e))?;
 
     if output.status.success() {
         Ok("Push successful".to_string())
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        Err(format!("Git push failed:\nSTDERR: {}\nSTDOUT: {}", stderr, stdout))
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
     }
 }
