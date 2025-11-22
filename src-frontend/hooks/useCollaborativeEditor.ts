@@ -2,10 +2,14 @@ import { useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Collaboration from "@tiptap/extension-collaboration";
 import { Markdown } from "@tiptap/markdown";
-import BubbleMenuExtension from "@tiptap/extension-bubble-menu"; // Import the extension
+import BubbleMenuExtension from "@tiptap/extension-bubble-menu"; 
 import * as Y from "yjs";
 import { useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
+
+// Import Registry and Mods
+import { registry } from "../mod-engine/Registry";
+import "../mods/SimulationBlock"; // Import to trigger registration
 
 export function useCollaborativeEditor() {
   const ydoc = useMemo(() => new Y.Doc(), []);
@@ -15,10 +19,12 @@ export function useCollaborativeEditor() {
       StarterKit.configure({ 
         // @ts-ignore
         history: false 
-    }),
+      }),
       Collaboration.configure({ document: ydoc }),
       Markdown,
-      BubbleMenuExtension, // Register the extension here
+      BubbleMenuExtension,
+      // Load all dynamic Mods
+      ...registry.getExtensions()
     ],
     editorProps: { attributes: { class: "editor-content" } },
   });
