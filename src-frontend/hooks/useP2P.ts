@@ -3,12 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import * as Y from "yjs";
 
-// Helper to normalize paths for comparison (handles Windows vs Unix slashes)
-const normalizePath = (path: string | null) => {
-  if (!path) return "";
-  return path.replace(/\\/g, "/");
-};
-
 export function useP2P(
   ydoc: Y.Doc, 
   currentRelativePath: string | null, 
@@ -16,7 +10,7 @@ export function useP2P(
   getFileContent: (path: string) => Promise<string>,
   onFileContentReceived: (data: number[]) => void,
   onSyncReceived?: () => void,
-  onHostDisconnect?: (hostId: string) => void
+  onHostDisconnect?: (hostId: string) => void //
 ) {
   const [myPeerId, setMyPeerId] = useState<string | null>(null);
   const [incomingRequest, setIncomingRequest] = useState<string | null>(null);
@@ -66,15 +60,16 @@ export function useP2P(
       listen<string>("host-disconnected", (e) => {
         setStatus(`⚠ Host disconnected! Negotiating...`);
         setIsHost(true);
-        if (onHostDisconnect) onHostDisconnect(e.payload);
+        if (onHostDisconnect) onHostDisconnect(e.payload); //
       }),
       
       listen<{ path: string, data: number[] }>("p2p-sync", (e) => {
-        // Normalize paths to ensure we match even if OS separators differ
-        if (currentRelativePath && normalizePath(e.payload.path) === normalizePath(currentRelativePath)) {
+        if (currentRelativePath && e.payload.path === currentRelativePath) {
+            // FIX: Allow Host to also clear their doc if they are receiving 
+            // the first sync packet (e.g., a full state push from a Guest).
             if (!hasSyncedRef.current) {
-                // FIX: Only clear if we are NOT the host. 
-                // The Host is the source of truth and should not self-wipe.
+                // Modified: Only clear if we are NOT the host. 
+                // The Host has authoritative content and should not be wiped by an incoming update.
                 if (!isHostRef.current) {
                     try {
                         const fragment = ydoc.getXmlFragment("default");
@@ -90,7 +85,7 @@ export function useP2P(
         }
       }),
       listen<{ path: string, data: number[] }>("p2p-file-content", (e) => {
-        if (currentRelativePath && normalizePath(e.payload.path) === normalizePath(currentRelativePath)) {
+        if (currentRelativePath && e.payload.path === currentRelativePath) {
            onFileContentReceived(e.payload.data);
            hasSyncedRef.current = true;
         }
@@ -98,12 +93,10 @@ export function useP2P(
       
       listen<{ path: string }>("sync-requested", async (e) => {
         const requestedPath = e.payload.path;
-        
-        // FIX: Normalize paths here too. If paths match (ignoring slashes), send the Yjs update.
-        if (currentRelativePath && normalizePath(requestedPath) === normalizePath(currentRelativePath)) {
+        if (currentRelativePath && requestedPath === currentRelativePath) {
             const state = Y.encodeStateAsUpdate(ydoc);
             invoke("broadcast_update", { 
-                path: currentRelativePath, // Use local path to ensure consistency
+                path: currentRelativePath, 
                 data: Array.from(state) 
             }).catch(console.error);
         } else {
