@@ -8,7 +8,7 @@ use libp2p::{
 };
 use tokio::sync::mpsc::Receiver;
 use futures::stream::StreamExt; 
-use serde::Serialize; // Added for event serialization
+use serde::Serialize; 
 
 use crate::protocol::{AppRequest, AppResponse, Payload};
 use crate::state::PeerState;
@@ -19,11 +19,16 @@ struct MyBehaviour {
     request_response: request_response::json::Behaviour<AppRequest, AppResponse>,
 }
 
-// Define event structure for frontend
 #[derive(Serialize, Clone)]
 struct SyncEvent {
     path: String,
     data: Vec<u8>,
+}
+
+// NEW: Event for when a peer requests the file state
+#[derive(Serialize, Clone)]
+struct SyncRequestEvent {
+    path: String,
 }
 
 pub async fn start_p2p_node(
@@ -80,7 +85,6 @@ pub async fn start_p2p_node(
                              );
                         }
                     },
-                    // Updated Sync handling to include path
                     ("sync", Payload::SyncData { path, data }) => {
                         let targets: Vec<String> = state.active_peers.lock().unwrap().iter().cloned().collect();
                         
@@ -96,6 +100,24 @@ pub async fn start_p2p_node(
                             swarm.behaviour_mut().request_response.send_request(
                                 &host,
                                 AppRequest::Sync { path: path.clone(), data: data.clone() }
+                            );
+                        }
+                    },
+                    // NEW: Handle RequestSync command from frontend
+                    ("request_sync", Payload::RequestSync { path }) => {
+                        let targets: Vec<String> = state.active_peers.lock().unwrap().iter().cloned().collect();
+                         for peer_str in targets {
+                            if let Ok(peer) = peer_str.parse::<PeerId>() {
+                                swarm.behaviour_mut().request_response.send_request(
+                                    &peer,
+                                    AppRequest::RequestSync { path: path.clone() }
+                                );
+                            }
+                        }
+                        if let Some(host) = current_host {
+                            swarm.behaviour_mut().request_response.send_request(
+                                &host,
+                                AppRequest::RequestSync { path: path.clone() }
                             );
                         }
                     },
@@ -127,9 +149,13 @@ pub async fn start_p2p_node(
                                 state.pending_invites.lock().unwrap().insert(peer.to_string(), channel);
                                 let _ = app_handle.emit("join-requested", peer.to_string());
                             },
-                            // Receive Sync and emit formatted event
                             AppRequest::Sync { path, data } => {
                                 let _ = app_handle.emit("p2p-sync", SyncEvent { path, data });
+                                let _ = swarm.behaviour_mut().request_response.send_response(channel, AppResponse::Ack);
+                            },
+                            // NEW: Handle Sync Request
+                            AppRequest::RequestSync { path } => {
+                                let _ = app_handle.emit("sync-requested", SyncRequestEvent { path });
                                 let _ = swarm.behaviour_mut().request_response.send_response(channel, AppResponse::Ack);
                             },
                             AppRequest::Ping => {

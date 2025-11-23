@@ -43,8 +43,9 @@ pub fn run() {
             commands::set_remote_origin,
             commands::push_changes,
             commands::get_remote_origin,
-            // NEW: Register the save command
-            commands::save_incoming_project 
+            commands::save_incoming_project,
+            // NEW: Register
+            commands::request_file_sync
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

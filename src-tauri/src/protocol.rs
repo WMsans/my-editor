@@ -11,6 +11,8 @@ pub enum AppRequest {
     Join { username: String },
     // Added path to Sync request
     Sync { path: String, data: Vec<u8> },
+    // NEW: Request full state for a file
+    RequestSync { path: String },
     Ping,
 }
 
@@ -27,4 +29,6 @@ pub enum Payload {
     JoinAccept { peer_id: String, content: Vec<u8> },
     // Changed SyncData to struct variant with path
     SyncData { path: String, data: Vec<u8> },
+    // NEW: Command payload
+    RequestSync { path: String },
 }

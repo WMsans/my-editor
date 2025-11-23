@@ -14,12 +14,22 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SlashMenu } from "./components/SlashMenu"; 
 import "./App.css";
 
+// Helper to get relative path for P2P sync ID
+const getRelativePath = (root: string, file: string | null) => {
+  if (!root || !file) return null;
+  if (file.startsWith(root)) {
+    let rel = file.substring(root.length);
+    // Remove leading slashes/backslashes
+    if (rel.startsWith("/") || rel.startsWith("\\")) rel = rel.substring(1);
+    return rel;
+  }
+  return file; // Fallback
+};
+
 function App() {
+  // State for folder management
   const [rootPath, setRootPath] = useState<string>("");
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
-  const { editor, ydoc } = useCollaborativeEditor(currentFilePath);
-  
-  // State for folder management
   const [fileSystemRefresh, setFileSystemRefresh] = useState(0);
   
   // Settings State
@@ -30,6 +40,12 @@ function App() {
   // Warning State
   const [warningMsg, setWarningMsg] = useState<string | null>(null);
   const [pendingQuit, setPendingQuit] = useState(false);
+
+  // Calculate relative path for the current session ID
+  const relativeFilePath = getRelativePath(rootPath, currentFilePath);
+
+  // Pass the RELATIVE path to hooks so peers agree on ID
+  const { editor, ydoc } = useCollaborativeEditor(currentFilePath, relativeFilePath);
 
   // Refs
   const rootPathRef = useRef(rootPath);
@@ -44,16 +60,15 @@ function App() {
     localStorage.setItem("sshKeyPath", sshKeyPath);
   }, [sshKeyPath]);
 
-  // Define onProjectReceived logic before using it in useP2P
+  // Define onProjectReceived logic
   const handleProjectReceived = useCallback(async (data: number[]) => {
-    // Prompt user for destination
     const destPath = prompt("You joined a session! Enter absolute path to clone the project folder:");
     if (destPath) {
       try {
         await invoke("save_incoming_project", { destPath, data });
         setRootPath(destPath);
         setFileSystemRefresh(prev => prev + 1);
-        setDetectedRemote(""); // Reset for new project
+        setDetectedRemote("");
         alert(`Project cloned to ${destPath}`);
       } catch (e) {
         setWarningMsg("Failed to save incoming project: " + e);
@@ -63,6 +78,7 @@ function App() {
     }
   }, []);
 
+  // Pass RELATIVE path to P2P hook
   const { 
     peers, 
     incomingRequest, 
@@ -70,8 +86,49 @@ function App() {
     status, 
     sendJoinRequest, 
     acceptRequest, 
-    rejectRequest 
-  } = useP2P(ydoc, currentFilePath, handleProjectReceived);
+    rejectRequest,
+    requestSync
+  } = useP2P(ydoc, relativeFilePath, handleProjectReceived);
+
+  // -- File Content Loading Logic --
+  useEffect(() => {
+    if (currentFilePath && editor) {
+      const loadFromDisk = () => {
+          invoke<string>("read_file_content", { path: currentFilePath })
+            .then((content) => {
+              try {
+                const jsonContent = JSON.parse(content);
+                if (jsonContent.type === 'doc' && Array.isArray(jsonContent.content)) {
+                  editor.commands.setContent(jsonContent);
+                } else {
+                  editor.commands.setContent(content, { contentType: 'markdown' });
+                }
+              } catch (e) {
+                editor.commands.setContent(content, { contentType: 'markdown' });
+              }
+            })
+            .catch((e) => setWarningMsg("Error opening file: " + e));
+      };
+
+      // If we are connected to peers, try to get the collaborative state first.
+      // This prevents us from loading local content (inserting it) and duplicating what the host has.
+      if (peers.length > 0 && relativeFilePath) {
+          requestSync(relativeFilePath);
+          
+          // Give peers a short window to respond. If editor remains empty, fall back to disk.
+          const timer = setTimeout(() => {
+              const docSize = ydoc.share.get('default') ? 1 : 0; // Crude check, or check chars
+              // Better check: if the doc is empty string
+              if (editor.getText().trim() === "") {
+                  loadFromDisk();
+              }
+          }, 500);
+          return () => clearTimeout(timer);
+      } else {
+          loadFromDisk();
+      }
+    }
+  }, [currentFilePath, editor, peers.length, relativeFilePath]); 
 
   // -- Auto-detect Remote Logic --
   useEffect(() => {
@@ -121,11 +178,7 @@ function App() {
 
   const handleOpenFolder = async () => {
     if (rootPath) {
-      try {
-        await pushChanges(rootPath);
-      } catch (e) {
-        return; 
-      }
+      try { await pushChanges(rootPath); } catch (e) { return; }
     }
 
     const path = prompt("Enter absolute folder path to open:");
@@ -153,28 +206,13 @@ function App() {
     await getCurrentWindow().destroy();
   };
 
-  const handleOpenFile = async (path: string) => {
-    try {
-      const content = await invoke<string>("read_file_content", { path });
-      try {
-        const jsonContent = JSON.parse(content);
-        if (jsonContent.type === 'doc' && Array.isArray(jsonContent.content)) {
-          editor?.commands.setContent(jsonContent);
-        } else {
-          throw new Error("Not a valid block document");
-        }
-      } catch (e) {
-        editor?.commands.setContent(content, { contentType: 'markdown' });
-      }
-      setCurrentFilePath(path);
-    } catch (e) {
-      setWarningMsg("Error opening file: " + e);
-    }
+  const handleOpenFile = (path: string) => {
+    setCurrentFilePath(path);
   };
 
   const handleNewFile = () => {
-    editor?.commands.clearContent();
     setCurrentFilePath(null);
+    editor?.commands.clearContent();
   };
 
   const handleSave = async () => {
@@ -253,7 +291,7 @@ function App() {
               {incomingRequest && (
                 <IncomingRequest 
                   peerId={incomingRequest} 
-                  onAccept={() => acceptRequest(rootPath)} // Pass current rootPath
+                  onAccept={() => acceptRequest(rootPath)} 
                   onReject={rejectRequest} 
                 />
               )}

@@ -3,10 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import * as Y from "yjs";
 
-// Add currentFilePath to arguments
 export function useP2P(
   ydoc: Y.Doc, 
-  currentFilePath: string | null, 
+  currentRelativePath: string | null, // Use relative path for matching
   onProjectReceived: (data: number[]) => void
 ) {
   const [peers, setPeers] = useState<string[]>([]);
@@ -35,11 +34,22 @@ export function useP2P(
         setStatus(`⚠ Host ${e.payload.slice(0, 8)} disconnected!`);
         setIsHost(true);
       }),
-      // Listen for structured Sync event
+      // Listen for sync events
       listen<{ path: string, data: number[] }>("p2p-sync", (e) => {
-        // Only apply update if we are looking at the same file
-        if (currentFilePath && e.payload.path === currentFilePath) {
+        // Filter: Only apply if the incoming path (relative) matches our current open file (relative)
+        if (currentRelativePath && e.payload.path === currentRelativePath) {
             Y.applyUpdate(ydoc, new Uint8Array(e.payload.data));
+        }
+      }),
+      // NEW: Listen for peers requesting the state of a file
+      listen<{ path: string }>("sync-requested", (e) => {
+        if (currentRelativePath && e.payload.path === currentRelativePath) {
+            // Encode the ENTIRE state as an update to bring the peer up to speed
+            const state = Y.encodeStateAsUpdate(ydoc);
+            invoke("broadcast_update", { 
+                path: currentRelativePath, 
+                data: Array.from(state) 
+            }).catch(console.error);
         }
       })
     ];
@@ -47,7 +57,7 @@ export function useP2P(
     return () => {
       listeners.forEach((l) => l.then((unlisten) => unlisten()));
     };
-  }, [ydoc, onProjectReceived, currentFilePath]); // Re-bind when file changes
+  }, [ydoc, onProjectReceived, currentRelativePath]);
 
   const sendJoinRequest = async (peerId: string) => {
     try {
@@ -78,6 +88,14 @@ export function useP2P(
 
   const rejectRequest = () => setIncomingRequest(null);
 
+  const requestSync = async (path: string) => {
+    try {
+      await invoke("request_file_sync", { path });
+    } catch (e) {
+      console.error("Failed to request sync", e);
+    }
+  };
+
   return {
     peers,
     incomingRequest,
@@ -85,6 +103,7 @@ export function useP2P(
     status,
     sendJoinRequest,
     acceptRequest,
-    rejectRequest
+    rejectRequest,
+    requestSync // Exported
   };
 }

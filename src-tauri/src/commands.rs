@@ -107,6 +107,16 @@ pub async fn broadcast_update(
     tx.send(("sync".to_string(), Payload::SyncData { path, data })).await.map_err(|e| e.to_string())
 }
 
+// NEW: Request sync for a specific file
+#[command]
+pub async fn request_file_sync(
+    path: String,
+    sender: SenderState<'_>
+) -> Result<(), String> {
+    let tx = sender.lock().await;
+    tx.send(("request_sync".to_string(), Payload::RequestSync { path })).await.map_err(|e| e.to_string())
+}
+
 #[command]
 pub fn read_directory(path: String) -> Result<Vec<FileEntry>, String> {
     let paths = fs::read_dir(path).map_err(|e| e.to_string())?;
