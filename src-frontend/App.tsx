@@ -46,7 +46,9 @@ function App() {
   // REFS
   const rootPathRef = useRef(rootPath);
   const sshKeyPathRef = useRef(sshKeyPath);
-  const isAutoJoining = useRef(false); // NEW: Track if we are auto-joining from meta file
+  const isAutoJoining = useRef(false); // Track if we are auto-joining from meta file
+  // [!code ++] New Ref to track current file inside callbacks without dependency issues
+  const currentFilePathRef = useRef(currentFilePath);
 
   useEffect(() => {
     rootPathRef.current = rootPath;
@@ -56,6 +58,11 @@ function App() {
     sshKeyPathRef.current = sshKeyPath;
     localStorage.setItem("sshKeyPath", sshKeyPath);
   }, [sshKeyPath]);
+  
+  // [!code ++] Keep ref synced
+  useEffect(() => {
+    currentFilePathRef.current = currentFilePath;
+  }, [currentFilePath]);
 
   useEffect(() => {
     syncReceivedRef.current = false;
@@ -98,7 +105,7 @@ function App() {
     let destPath: string | null = null;
     let silent = false;
 
-    // FIX: If auto-joining (via meta file), use current root directly without prompt
+    // If auto-joining (via meta file), use current root directly without prompt
     if (isAutoJoining.current && rootPathRef.current) {
         destPath = rootPathRef.current;
         silent = true; 
@@ -113,6 +120,16 @@ function App() {
         setRootPath(destPath);
         setFileSystemRefresh(prev => prev + 1);
         setDetectedRemote("");
+
+        // [!code ++] FIX BUG 2: Force reopen the active file to hook up collaboration
+        // The file content on disk changed, but Editor is still holding old memory state.
+        const activeFile = currentFilePathRef.current;
+        if (activeFile) {
+           setCurrentFilePath(null);
+           // Small timeout to ensure complete unmount/remount of editor components
+           setTimeout(() => setCurrentFilePath(activeFile), 50);
+        }
+
         if (!silent) alert(`Project cloned to ${destPath}`);
       } catch (e) {
         setWarningMsg("Failed to save incoming project: " + e);
@@ -127,7 +144,7 @@ function App() {
     myPeerId,
     incomingRequest, 
     isHost, 
-    isJoining, // [!code ++]
+    isJoining,
     status,
     setStatus,
     sendJoinRequest, 
@@ -143,7 +160,7 @@ function App() {
       onSyncReceived 
   );
 
-  // [!code ++] Track isHost in ref to access it in cleanup (onCloseRequested)
+  // Track isHost in ref to access it in cleanup (onCloseRequested)
   const isHostRef = useRef(isHost);
   useEffect(() => {
     isHostRef.current = isHost;
@@ -189,7 +206,7 @@ function App() {
             const isOnline = peers.includes(metaHost);
             if (isOnline) {
                 setStatus(`Found host ${metaHost.slice(0,8)}. Joining...`);
-                isAutoJoining.current = true; // NEW: Set flag to suppress clone prompt
+                isAutoJoining.current = true; // Set flag to suppress clone prompt
                 sendJoinRequest(metaHost);
                 return; // Logic ends here: we are a guest
             } else {
@@ -209,7 +226,7 @@ function App() {
             content: JSON.stringify({ hostId: myPeerId }, null, 2) 
         });
 
-        // 5. Commit and Push [!code ++] Immediate push verified
+        // 5. Commit and Push
         try {
             await invoke("push_changes", { path: rootPath, sshKeyPath: ssh });
             setStatus("Host claimed and synced.");
@@ -321,7 +338,7 @@ function App() {
         event.preventDefault(); 
         setIsPushing(true);
         try {
-          // [!code ++] FIX: If we are host, clear the hostId in meta file before pushing
+          // FIX BUG 1: If we are host, clear the hostId in meta file before pushing
           if (isHostRef.current) {
              const sep = currentRoot.includes("\\") ? "\\" : "/";
              const metaPath = `${currentRoot}${sep}${META_FILE}`;
