@@ -1,3 +1,4 @@
+// src-frontend/hooks/useP2P.ts
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -16,6 +17,7 @@ export function useP2P(
   const [incomingRequest, setIncomingRequest] = useState<string | null>(null);
   const [isHost, setIsHost] = useState(true);
   const [status, setStatus] = useState("Initializing...");
+  const [isJoining, setIsJoining] = useState(false); // [!code ++]
   
   // Ref to track host status inside listeners
   const isHostRef = useRef(isHost);
@@ -40,6 +42,7 @@ export function useP2P(
       listen<number[]>("join-accepted", (e) => {
         onProjectReceived(e.payload);
         setIsHost(false);
+        setIsJoining(false); // [!code ++]
         setStatus("Joined session! Folder synced.");
       }),
       listen<string>("host-disconnected", (e) => {
@@ -102,9 +105,11 @@ export function useP2P(
   // ... (rest of the hook functions: sendJoinRequest, acceptRequest, etc.)
   const sendJoinRequest = async (peerId: string) => {
     try {
+      setIsJoining(true); // [!code ++]
       setStatus(`Requesting to join ${peerId.slice(0, 8)}...`);
       await invoke("request_join", { peerId });
     } catch (e) {
+      setIsJoining(false); // [!code ++]
       setStatus(`Error joining: ${e}`);
     }
   };
@@ -142,6 +147,7 @@ export function useP2P(
     myPeerId,
     incomingRequest,
     isHost,
+    isJoining, // [!code ++]
     status,
     setStatus,
     sendJoinRequest,

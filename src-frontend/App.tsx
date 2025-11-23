@@ -1,3 +1,4 @@
+// src-frontend/App.tsx
 import { useState, useEffect, useRef, useCallback } from "react";
 import { EditorContent } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus" 
@@ -126,6 +127,7 @@ function App() {
     myPeerId,
     incomingRequest, 
     isHost, 
+    isJoining, // [!code ++]
     status,
     setStatus,
     sendJoinRequest, 
@@ -140,6 +142,12 @@ function App() {
       onFileContentReceived,
       onSyncReceived 
   );
+
+  useEffect(() => {
+    if (editor) {
+      editor.setEditable(!isJoining);
+    }
+  }, [editor, isJoining]);
 
   // --- IMPROVED HOST NEGOTIATION LOGIC ---
 
