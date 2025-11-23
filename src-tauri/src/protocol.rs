@@ -10,7 +10,6 @@ pub struct FileSyncEntry {
 pub enum AppRequest {
     Join { username: String },
     Sync { path: String, data: Vec<u8> },
-    // Added FileContent request
     FileContent { path: String, data: Vec<u8> },
     RequestSync { path: String },
     Ping,
@@ -25,10 +24,10 @@ pub enum AppResponse {
 
 #[derive(Debug, Clone)]
 pub enum Payload {
-    PeerId(String),
+    // CHANGED: Now includes optional remote_addr to dial before requesting
+    JoinCall { peer_id: String, remote_addr: Option<String> }, 
     JoinAccept { peer_id: String, content: Vec<u8> },
     SyncData { path: String, data: Vec<u8> },
-    // Added FileContent payload
     FileContent { path: String, data: Vec<u8> },
     RequestSync { path: String },
 }

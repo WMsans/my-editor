@@ -1,4 +1,3 @@
-// src-frontend/App.tsx
 import { useState, useEffect, useRef, useCallback } from "react";
 import { EditorContent } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus" 
@@ -42,11 +41,9 @@ function App() {
   const relativeFilePath = getRelativePath(rootPath, currentFilePath);
   const { editor, ydoc } = useCollaborativeEditor(currentFilePath, relativeFilePath);
   
-  // REFS
   const rootPathRef = useRef(rootPath);
   const sshKeyPathRef = useRef(sshKeyPath);
-  const isAutoJoining = useRef(false); // Track if we are auto-joining from meta file
-  // [!code ++] New Ref to track current file inside callbacks without dependency issues
+  const isAutoJoining = useRef(false); 
   const currentFilePathRef = useRef(currentFilePath);
 
   useEffect(() => {
@@ -58,7 +55,6 @@ function App() {
     localStorage.setItem("sshKeyPath", sshKeyPath);
   }, [sshKeyPath]);
   
-  // [!code ++] Keep ref synced
   useEffect(() => {
     currentFilePathRef.current = currentFilePath;
   }, [currentFilePath]);
@@ -104,11 +100,10 @@ function App() {
     let destPath: string | null = null;
     let silent = false;
 
-    // If auto-joining (via meta file), use current root directly without prompt
     if (isAutoJoining.current && rootPathRef.current) {
         destPath = rootPathRef.current;
         silent = true; 
-        isAutoJoining.current = false; // Reset flag
+        isAutoJoining.current = false; 
     } else {
         destPath = prompt("You joined a session! Enter absolute path to clone the project folder:");
     }
@@ -120,12 +115,9 @@ function App() {
         setFileSystemRefresh(prev => prev + 1);
         setDetectedRemote("");
 
-        // [!code ++] FIX BUG 2: Force reopen the active file to hook up collaboration
-        // The file content on disk changed, but Editor is still holding old memory state.
         const activeFile = currentFilePathRef.current;
         if (activeFile) {
            setCurrentFilePath(null);
-           // Small timeout to ensure complete unmount/remount of editor components
            setTimeout(() => setCurrentFilePath(activeFile), 50);
         }
 
@@ -148,7 +140,8 @@ function App() {
     sendJoinRequest, 
     acceptRequest, 
     rejectRequest,
-    requestSync
+    requestSync,
+    myAddresses // NEW: Use myAddresses
   } = useP2P(
       ydoc, 
       relativeFilePath, 
@@ -158,7 +151,6 @@ function App() {
       onSyncReceived 
   );
 
-  // Track isHost in ref to access it in cleanup (onCloseRequested)
   const isHostRef = useRef(isHost);
   useEffect(() => {
     isHostRef.current = isHost;
@@ -170,8 +162,6 @@ function App() {
     }
   }, [editor, isJoining]);
 
-  // --- IMPROVED HOST NEGOTIATION LOGIC ---
-
   const negotiateHost = async (retryCount = 0) => {
     if (!rootPath || !myPeerId) return;
     
@@ -182,50 +172,56 @@ function App() {
     const ssh = sshKeyPathRef.current || "";
 
     try {
-        // 1. Try to Pull (Ignore errors: it might be a new local folder)
         try {
             await invoke("git_pull", { path: rootPath, sshKeyPath: ssh });
         } catch (e) {
             console.log("Git pull skipped/failed (expected if new repo):", e);
         }
         
-        // 2. Read Meta File
         let metaHost = "";
+        let metaAddrs: string[] = [];
         try {
             const content = await invoke<string>("read_file_content", { path: metaPath });
             const json = JSON.parse(content);
             metaHost = json.hostId;
+            metaAddrs = json.hostAddrs || [];
         } catch (e) {
             console.log("Meta file missing or invalid.");
         }
 
-        // 3. Logic: Check if Host is Online
         if (metaHost && metaHost !== myPeerId) {
             setStatus(`Found host ${metaHost.slice(0,8)}. Joining...`);
-            isAutoJoining.current = true; // Set flag to suppress clone prompt
-            sendJoinRequest(metaHost);
-            return; // Logic ends here: we are a guest
-        }
-
-        // 4. Become Host (If no meta, or host offline, or I am host)
-        if (metaHost === myPeerId) {
-            setStatus("I am the host (verified).");
+            isAutoJoining.current = true; 
+            // NEW: Pick first available address to join
+            const targetAddr = metaAddrs.length > 0 ? metaAddrs[0] : undefined;
+            sendJoinRequest(metaHost, targetAddr);
             return; 
         }
 
-        // Claim Host Role: Write ID to file
+        if (metaHost === myPeerId) {
+             // NEW: Check if addresses match what we have, to update them if needed
+             const currentSavedAddrs = metaAddrs || [];
+             const sortedSaved = [...currentSavedAddrs].sort();
+             const sortedCurrent = [...myAddresses].sort();
+             
+             if (JSON.stringify(sortedSaved) === JSON.stringify(sortedCurrent)) {
+                 setStatus("I am the host (verified).");
+                 return; 
+             }
+             setStatus("Updating host addresses...");
+        }
+
+        // Claim Host Role: Write ID and Addresses
         await invoke("write_file_content", { 
             path: metaPath, 
-            content: JSON.stringify({ hostId: myPeerId }, null, 2) 
+            content: JSON.stringify({ hostId: myPeerId, hostAddrs: myAddresses }, null, 2) 
         });
 
-        // 5. Commit and Push
         try {
             await invoke("push_changes", { path: rootPath, sshKeyPath: ssh });
             setStatus("Host claimed and synced.");
         } catch (e) {
             console.error("Push failed:", e);
-            // RECURSIVE RETRY LOGIC
             if (retryCount < 2) {
                 setStatus(`Push failed. Retrying... (${retryCount + 1}/2)`);
                 setTimeout(() => negotiateHost(retryCount + 1), 2000);
@@ -240,14 +236,13 @@ function App() {
     }
   };
 
-  // Trigger negotiation on Open or Peer ID ready
+  // NEW: Re-negotiate when myAddresses changes to ensure IP is shared
   useEffect(() => {
     if (rootPath && myPeerId) {
        negotiateHost();
     }
-  }, [rootPath, myPeerId]); 
+  }, [rootPath, myPeerId, myAddresses]); 
 
-  // Trigger negotiation if I suddenly become host (e.g. previous host disconnects)
   const prevIsHost = useRef(isHost);
   useEffect(() => {
     if (!prevIsHost.current && isHost && rootPath) {
@@ -274,7 +269,7 @@ function App() {
               } catch (e) {
                 editor.commands.setContent(content, { contentType: 'markdown' });
               }
-              setIsSyncing(false); // Ensure overlay is removed
+              setIsSyncing(false); 
             })
             .catch((e) => {
                 setWarningMsg("Error opening file: " + e);
@@ -313,7 +308,6 @@ function App() {
         event.preventDefault(); 
         setIsPushing(true);
         try {
-          // FIX BUG 1: If we are host, clear the hostId in meta file before pushing
           if (isHostRef.current) {
              const sep = currentRoot.includes("\\") ? "\\" : "/";
              const metaPath = `${currentRoot}${sep}${META_FILE}`;

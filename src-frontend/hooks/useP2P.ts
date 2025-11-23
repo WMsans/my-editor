@@ -1,4 +1,3 @@
-// src-frontend/hooks/useP2P.ts
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -17,14 +16,13 @@ export function useP2P(
   const [isHost, setIsHost] = useState(true);
   const [status, setStatus] = useState("Initializing...");
   const [isJoining, setIsJoining] = useState(false);
-  
-  // Ref to track host status inside listeners
+  const [myAddresses, setMyAddresses] = useState<string[]>([]); // NEW
+
   const isHostRef = useRef(isHost);
   useEffect(() => {
     isHostRef.current = isHost;
   }, [isHost]);
 
-  // NEW: Track if we have synced the current file to avoid merging local "noise" with remote "truth"
   const hasSyncedRef = useRef(false);
   useEffect(() => {
     hasSyncedRef.current = false;
@@ -35,6 +33,13 @@ export function useP2P(
 
     const listeners = [
       listen<string>("local-peer-id", (e) => setMyPeerId(e.payload)),
+      // NEW: Listen for addresses
+      listen<string>("new-listen-addr", (e) => {
+         setMyAddresses(prev => {
+             if (prev.includes(e.payload)) return prev;
+             return [...prev, e.payload];
+         });
+      }),
       listen<string>("join-requested", (e) => {
         setIncomingRequest(e.payload);
         setStatus(`Incoming request from ${e.payload.slice(0, 8)}...`);
@@ -47,15 +52,11 @@ export function useP2P(
       }),
       listen<string>("host-disconnected", (e) => {
         setStatus(`⚠ Host disconnected! Negotiating...`);
-        // FIX: Immediately remove the disconnected host from peers so negotiation knows they are offline
-        setIsHost(true); // Failover to host mode
+        setIsHost(true); 
       }),
-      
-      // --- SYNC LISTENERS ---
       
       listen<{ path: string, data: number[] }>("p2p-sync", (e) => {
         if (currentRelativePath && e.payload.path === currentRelativePath) {
-            // New Logic: Use the first sync to overwrite local state (prevent duplication)
             if (!isHostRef.current && !hasSyncedRef.current) {
                 try {
                     const fragment = ydoc.getXmlFragment("default");
@@ -65,8 +66,6 @@ export function useP2P(
                     console.error("Failed to clear YDoc:", e);
                 }
             }
-
-            // FIX: Tag the update as 'p2p' so useCollaborativeEditor doesn't echo it
             Y.applyUpdate(ydoc, new Uint8Array(e.payload.data), 'p2p');
             if (onSyncReceived) onSyncReceived();
         }
@@ -78,11 +77,8 @@ export function useP2P(
         }
       }),
       
-      // Handle requests for sync (Host asking Guest, or Guest asking Host)
       listen<{ path: string }>("sync-requested", async (e) => {
         const requestedPath = e.payload.path;
-        
-        // 1. If we have the file open (Host or Guest), share the LIVE state.
         if (currentRelativePath && requestedPath === currentRelativePath) {
             const state = Y.encodeStateAsUpdate(ydoc);
             invoke("broadcast_update", { 
@@ -90,8 +86,6 @@ export function useP2P(
                 data: Array.from(state) 
             }).catch(console.error);
         } else {
-            // 2. If we don't have it open, only the HOST should read from disk.
-            // This prevents Guests from overwriting the Host with stale local files.
             if (isHostRef.current) {
                 try {
                     const content = await getFileContent(requestedPath);
@@ -113,11 +107,12 @@ export function useP2P(
     };
   }, [ydoc, onProjectReceived, currentRelativePath, getFileContent, onFileContentReceived, onSyncReceived]);
 
-  const sendJoinRequest = async (peerId: string) => {
+  const sendJoinRequest = async (peerId: string, remoteAddr?: string) => {
     try {
       setIsJoining(true);
       setStatus(`Requesting to join ${peerId.slice(0, 8)}...`);
-      await invoke("request_join", { peerId });
+      // NEW: Pass remoteAddr to backend
+      await invoke("request_join", { peerId, remoteAddr });
     } catch (e) {
       setIsJoining(false);
       setStatus(`Error joining: ${e}`);
@@ -162,6 +157,7 @@ export function useP2P(
     sendJoinRequest,
     acceptRequest,
     rejectRequest,
-    requestSync 
+    requestSync,
+    myAddresses // NEW: Export addresses
   };
 }

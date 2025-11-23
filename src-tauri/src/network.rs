@@ -3,7 +3,7 @@ use std::time::Duration;
 use libp2p::{
     noise, tcp, yamux,
     swarm::{NetworkBehaviour, SwarmEvent},
-    SwarmBuilder, PeerId, StreamProtocol,
+    SwarmBuilder, PeerId, StreamProtocol, Multiaddr, // Added Multiaddr
     request_response::{self, ProtocolSupport},
 };
 use tokio::sync::mpsc::Receiver;
@@ -29,7 +29,6 @@ struct SyncRequestEvent {
     path: String,
 }
 
-// NEW: Event for raw file content
 #[derive(Serialize, Clone)]
 struct FileContentEvent {
     path: String,
@@ -55,7 +54,6 @@ pub async fn start_p2p_node(
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
 
-    // NEW: Capture and emit local Peer ID
     let local_peer_id = swarm.local_peer_id().to_string();
     println!("Local Peer ID: {}", local_peer_id);
     *state.local_peer_id.lock().unwrap() = Some(local_peer_id.clone());
@@ -76,8 +74,15 @@ pub async fn start_p2p_node(
 
             Some((cmd, payload)) = cmd_rx.recv() => {
                 match (cmd.as_str(), payload) {
-                    ("join", Payload::PeerId(peer_str)) => {
+                    // CHANGED: Handle JoinCall with address
+                    ("join", Payload::JoinCall { peer_id: peer_str, remote_addr }) => {
                         if let Ok(peer) = peer_str.parse::<PeerId>() {
+                             if let Some(addr_str) = remote_addr {
+                                 if let Ok(addr) = addr_str.parse::<Multiaddr>() {
+                                     // Try dialing to establish connection first
+                                     let _ = swarm.dial(addr);
+                                 }
+                             }
                             swarm.behaviour_mut().request_response.send_request(
                                 &peer, 
                                 AppRequest::Join { username: "Guest".into() }
@@ -130,7 +135,6 @@ pub async fn start_p2p_node(
                             );
                         }
                     },
-                    // NEW: Send File Content
                     ("file_content", Payload::FileContent { path, data }) => {
                         let targets: Vec<String> = state.active_peers.lock().unwrap().iter().cloned().collect();
                         for peer_str in targets {
@@ -154,6 +158,11 @@ pub async fn start_p2p_node(
             
             event = swarm.select_next_some() => {
                 match event {
+                     // NEW: Capture Listen Addresses
+                    SwarmEvent::NewListenAddr { address, .. } => {
+                        println!("Listening on {:?}", address);
+                        let _ = app_handle.emit("new-listen-addr", address.to_string());
+                    },
                     SwarmEvent::Behaviour(MyBehaviourEvent::RequestResponse(request_response::Event::Message { 
                         peer, message: request_response::Message::Request { request, channel, .. }, ..
                     })) => {
@@ -171,7 +180,6 @@ pub async fn start_p2p_node(
                                 let _ = app_handle.emit("sync-requested", SyncRequestEvent { path });
                                 let _ = swarm.behaviour_mut().request_response.send_response(channel, AppResponse::Ack);
                             },
-                            // NEW: Handle File Content
                             AppRequest::FileContent { path, data } => {
                                 let _ = app_handle.emit("p2p-file-content", FileContentEvent { path, data });
                                 let _ = swarm.behaviour_mut().request_response.send_response(channel, AppResponse::Ack);
