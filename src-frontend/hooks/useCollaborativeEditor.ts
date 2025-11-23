@@ -6,20 +6,9 @@ import BubbleMenuExtension from "@tiptap/extension-bubble-menu";
 import * as Y from "yjs";
 import { useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Extension } from "@tiptap/core"; //
 
 import { registry } from "../mod-engine/Registry";
 import "../mods/SimulationBlock"; 
-
-const MultiLineEnter = Extension.create({
-  name: 'multiLineEnter',
-  addKeyboardShortcuts() {
-    return {
-      'Enter': () => this.editor.commands.setHardBreak(),
-      'Shift-Enter': () => this.editor.commands.splitBlock(),
-    }
-  }
-});
 
 // We accept currentFilePath to force editor recreation, 
 // and channelId (relative path) for the broadcast topic.
@@ -34,7 +23,6 @@ export function useCollaborativeEditor(currentFilePath: string | null, channelId
         // @ts-ignore
         history: false 
       }),
-      MultiLineEnter, //
       Collaboration.configure({ document: ydoc }),
       Markdown,
       BubbleMenuExtension,
