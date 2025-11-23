@@ -21,23 +21,21 @@ export const SlashMenu: React.FC<SlashMenuProps> = ({ editor }) => {
       
       // Detect "/" at start of a paragraph OR after a hard break
       const parent = $from.parent;
-      
-      // We use \uFFFC (Object Replacement Character) as the placeholder for leaf nodes like HardBreak
+      // Get text before cursor in current node. 
+      // Note: \uFFFC is the placeholder for leaf nodes (like HardBreak)
       const textBefore = parent.textBetween(0, $from.parentOffset, '\n', '\uFFFC');
       
-      // Check if line starts with "/" 
-      // 1. "/" at very start
-      // 2. "\n/" after a block node (if any)
-      // 3. "\uFFFC/" after a HardBreak node
+      // Check if line starts with "/" (Start of block OR after a newline/break)
       const isStartOfLine = textBefore === "/" || textBefore.endsWith("\n/") || textBefore.endsWith("\uFFFC/");
 
-      if (isStartOfLine && parent.type.name === 'paragraph') {
+      if (isStartOfLine && parent.type.name === 'paragraph') { //
         const coords = view.coordsAtPos($from.pos);
+        // Adjust for editor offset
         const editorRect = view.dom.getBoundingClientRect();
         
         setIsOpen(true);
         setPosition({
-          top: coords.top - editorRect.top + 30, 
+          top: coords.top - editorRect.top + 30, // Relative to editor container
           left: coords.left - editorRect.left
         });
       } else {
@@ -56,6 +54,7 @@ export const SlashMenu: React.FC<SlashMenuProps> = ({ editor }) => {
     if (modId === 'simulation') {
       editor.commands.insertContent({ type: 'simulationBlock' });
     }
+    // Add logic for other block types here
     
     setIsOpen(false);
     editor.chain().focus().run();
