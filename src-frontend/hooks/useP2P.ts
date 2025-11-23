@@ -31,7 +31,6 @@ export function useP2P(
   useEffect(() => {
     invoke<string>("get_local_peer_id").then(setMyPeerId).catch(() => {});
     
-    // ADD THIS: Fetch addresses that might have been emitted before we loaded
     invoke<string[]>("get_local_addrs").then((addrs) => {
         setMyAddresses(prev => {
             const unique = new Set([...prev, ...addrs]);
@@ -64,14 +63,16 @@ export function useP2P(
       
       listen<{ path: string, data: number[] }>("p2p-sync", (e) => {
         if (currentRelativePath && e.payload.path === currentRelativePath) {
-            if (!isHostRef.current && !hasSyncedRef.current) {
+            // FIX: Allow Host to also clear their doc if they are receiving 
+            // the first sync packet (e.g., a full state push from a Guest).
+            if (!hasSyncedRef.current) {
                 try {
                     const fragment = ydoc.getXmlFragment("default");
                     fragment.delete(0, fragment.length);
-                    hasSyncedRef.current = true;
                 } catch (e) {
                     console.error("Failed to clear YDoc:", e);
                 }
+                hasSyncedRef.current = true;
             }
             Y.applyUpdate(ydoc, new Uint8Array(e.payload.data), 'p2p');
             if (onSyncReceived) onSyncReceived();
@@ -114,12 +115,10 @@ export function useP2P(
     };
   }, [ydoc, onProjectReceived, currentRelativePath, getFileContent, onFileContentReceived, onSyncReceived]);
 
-  // CHANGED: Accept array of addresses
   const sendJoinRequest = async (peerId: string, remoteAddrs: string[] = []) => {
     try {
       setIsJoining(true);
       setStatus(`Requesting to join ${peerId.slice(0, 8)}...`);
-      // Use new param name
       await invoke("request_join", { peerId, remoteAddrs });
     } catch (e) {
       setIsJoining(false);
