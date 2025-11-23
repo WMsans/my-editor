@@ -7,10 +7,28 @@ import { registry } from "../mod-engine/Registry";
 
 // 1. The React Component
 const SimulationComponent = (props: any) => {
-  const [code, setCode] = useState(props.node.attrs.code || 
-    "// Draw something cool\nconst ctx = canvas.getContext('2d');\nctx.fillStyle = 'red';\nctx.fillRect(10, 10, 50, 50);");
+  // Use default if code is null
+  const defaultCode = "// Draw something cool\nconst ctx = canvas.getContext('2d');\nctx.fillStyle = 'red';\nctx.fillRect(10, 10, 50, 50);";
+  
+  const [code, setCode] = useState(props.node.attrs.code || defaultCode);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Sync from Tiptap attributes (Collaboration/Peers) to local state
+  useEffect(() => {
+    const currentAttr = props.node.attrs.code;
+    // If attribute is not null (modified) and different from local state, update local state
+    if (currentAttr !== null && currentAttr !== code) {
+      setCode(currentAttr);
+    }
+  }, [props.node.attrs.code, code]);
+
+  // Handle typing: Update local state AND Tiptap attributes
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newCode = e.target.value;
+    setCode(newCode);
+    props.updateAttributes({ code: newCode });
+  };
 
   const runCode = () => {
     if (!canvasRef.current) return;
@@ -24,6 +42,7 @@ const SimulationComponent = (props: any) => {
       const func = new Function("canvas", "console", code);
       func(canvas, { log: console.log });
       setError(null);
+      // Ensure attributes are consistent (though handleChange handles it mostly)
       props.updateAttributes({ code });
     } catch (e: any) {
       setError(e.message);
@@ -39,7 +58,7 @@ const SimulationComponent = (props: any) => {
       <div className="simulation-content" contentEditable={false}>
         <textarea 
           value={code} 
-          onChange={(e) => setCode(e.target.value)}
+          onChange={handleChange}
           spellCheck={false}
           onKeyDown={(e) => e.stopPropagation()} // Prevent editor shortcuts
         />
