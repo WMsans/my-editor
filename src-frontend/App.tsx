@@ -211,6 +211,8 @@ function App() {
              setStatus("Updating host addresses...");
         }
 
+        if (!isHostRef.current) return;
+
         // Claim Host Role: Write ID and Addresses
         await invoke("write_file_content", { 
             path: metaPath, 
