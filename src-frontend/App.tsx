@@ -46,7 +46,7 @@ function App() {
   // REFS
   const rootPathRef = useRef(rootPath);
   const sshKeyPathRef = useRef(sshKeyPath);
-  const isAutoJoining = useRef(false); // NEW: Track if we are auto-joining from meta file
+  const isAutoJoining = useRef(false); 
 
   useEffect(() => {
     rootPathRef.current = rootPath;
@@ -98,11 +98,10 @@ function App() {
     let destPath: string | null = null;
     let silent = false;
 
-    // FIX: If auto-joining (via meta file), use current root directly without prompt
     if (isAutoJoining.current && rootPathRef.current) {
         destPath = rootPathRef.current;
         silent = true; 
-        isAutoJoining.current = false; // Reset flag
+        isAutoJoining.current = false; 
     } else {
         destPath = prompt("You joined a session! Enter absolute path to clone the project folder:");
     }
@@ -127,7 +126,7 @@ function App() {
     myPeerId,
     incomingRequest, 
     isHost, 
-    isJoining, // [!code ++]
+    isJoining,
     status,
     setStatus,
     sendJoinRequest, 
@@ -143,7 +142,7 @@ function App() {
       onSyncReceived 
   );
 
-  // [!code ++] Track isHost in ref to access it in cleanup (onCloseRequested)
+  // [!code ++] Track isHost to clear meta file on exit
   const isHostRef = useRef(isHost);
   useEffect(() => {
     isHostRef.current = isHost;
@@ -167,7 +166,7 @@ function App() {
     const ssh = sshKeyPathRef.current || "";
 
     try {
-        // 1. Try to Pull (Ignore errors: it might be a new local folder)
+        // 1. Try to Pull
         try {
             await invoke("git_pull", { path: rootPath, sshKeyPath: ssh });
         } catch (e) {
@@ -189,15 +188,15 @@ function App() {
             const isOnline = peers.includes(metaHost);
             if (isOnline) {
                 setStatus(`Found host ${metaHost.slice(0,8)}. Joining...`);
-                isAutoJoining.current = true; // NEW: Set flag to suppress clone prompt
+                isAutoJoining.current = true;
                 sendJoinRequest(metaHost);
-                return; // Logic ends here: we are a guest
+                return; 
             } else {
                 setStatus(`Host ${metaHost.slice(0,8)} offline. Claiming host role...`);
             }
         }
 
-        // 4. Become Host (If no meta, or host offline, or I am host)
+        // 4. Become Host 
         if (metaHost === myPeerId) {
             setStatus("I am the host (verified).");
             return; 
@@ -209,13 +208,12 @@ function App() {
             content: JSON.stringify({ hostId: myPeerId }, null, 2) 
         });
 
-        // 5. Commit and Push [!code ++] Immediate push verified
+        // 5. Commit and Push Immediately [!code ++]
         try {
             await invoke("push_changes", { path: rootPath, sshKeyPath: ssh });
             setStatus("Host claimed and synced.");
         } catch (e) {
             console.error("Push failed:", e);
-            // RECURSIVE RETRY LOGIC
             if (retryCount < 2) {
                 setStatus(`Push failed. Retrying... (${retryCount + 1}/2)`);
                 setTimeout(() => negotiateHost(retryCount + 1), 2000);
@@ -237,7 +235,7 @@ function App() {
     }
   }, [rootPath, myPeerId]); 
 
-  // Trigger negotiation if I suddenly become host (e.g. previous host disconnects)
+  // Trigger negotiation if I suddenly become host
   const prevIsHost = useRef(isHost);
   useEffect(() => {
     if (!prevIsHost.current && isHost && rootPath) {
@@ -264,7 +262,7 @@ function App() {
               } catch (e) {
                 editor.commands.setContent(content, { contentType: 'markdown' });
               }
-              setIsSyncing(false); // Ensure overlay is removed
+              setIsSyncing(false); 
             })
             .catch((e) => {
                 setWarningMsg("Error opening file: " + e);
@@ -274,17 +272,13 @@ function App() {
 
       if (isHost) {
           if (peers.length > 0 && relativeFilePath) {
-              // Host attempts to sync from potential guests first
               setIsSyncing(true);
               requestSync(relativeFilePath);
 
               const timer = setTimeout(() => {
-                   // Only load from disk if we haven't received a sync from a guest
                    if (!syncReceivedRef.current) {
-                       // Check if empty is optional, but safer to just load if no sync arrived
                        loadFromDisk();
                    } else {
-                       // Sync received, ensure overlay is off
                        setIsSyncing(false);
                    }
               }, 500);
@@ -321,18 +315,18 @@ function App() {
         event.preventDefault(); 
         setIsPushing(true);
         try {
-          // [!code ++] FIX: If we are host, clear the hostId in meta file before pushing
+          // [!code ++] FIX: If host, clear host ID to release lock
           if (isHostRef.current) {
-             const sep = currentRoot.includes("\\") ? "\\" : "/";
-             const metaPath = `${currentRoot}${sep}${META_FILE}`;
-             try {
+              const sep = currentRoot.includes("\\") ? "\\" : "/";
+              const metaPath = `${currentRoot}${sep}${META_FILE}`;
+              try {
                 await invoke("write_file_content", { 
                     path: metaPath, 
                     content: JSON.stringify({ hostId: "" }, null, 2) 
                 });
-             } catch (e) {
-                console.error("Failed to clear host ID:", e);
-             }
+              } catch(e) {
+                  console.error("Failed to clear host ID:", e);
+              }
           }
 
           await invoke("push_changes", { path: currentRoot, sshKeyPath: currentSsh || "" });
