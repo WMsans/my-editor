@@ -220,8 +220,9 @@ function App() {
         event.preventDefault(); 
         console.log("Window close requested. Attempting push...");
         try {
-          if (!currentSsh) throw new Error("SSH Key path not set in Settings.");
-          await invoke("push_changes", { path: currentRoot, sshKeyPath: currentSsh });
+          // REMOVED BLOCKING CHECK: if (!currentSsh) throw new Error(...)
+          // Now allows pushing with empty SSH key (using agent/config)
+          await invoke("push_changes", { path: currentRoot, sshKeyPath: currentSsh || "" });
           await win.destroy();
         } catch (e: any) {
           setWarningMsg(`Failed to push changes before quitting:\n\n${e}\n\nQuit anyway?`);
