@@ -6,7 +6,8 @@ use crate::state::PeerState;
 use std::fs;
 use std::path::Path;
 use serde::Serialize;
-use git2::{Repository, Signature, IndexAddOption, Cred, RemoteCallbacks, PushOptions};
+use git2::{Repository}; // Removed unused imports for brevity
+use std::process::Command; // NEW
 
 type SenderState<'a> = State<'a, Arc<Mutex<tokio::sync::mpsc::Sender<(String, Payload)>>>>;
 
@@ -17,6 +18,7 @@ pub struct FileEntry {
     is_dir: bool,
 }
 
+// ... visit_dirs function (keep as is) ...
 fn visit_dirs(dir: &Path, base: &Path, cb: &mut Vec<FileSyncEntry>) -> std::io::Result<()> {
     if dir.is_dir() {
         for entry in fs::read_dir(dir)? {
@@ -44,6 +46,39 @@ fn visit_dirs(dir: &Path, base: &Path, cb: &mut Vec<FileSyncEntry>) -> std::io::
     }
     Ok(())
 }
+
+// NEW: Expose Local Peer ID
+#[command]
+pub fn get_local_peer_id(state: State<'_, PeerState>) -> Result<String, String> {
+    state.local_peer_id.lock().unwrap().clone().ok_or("Peer ID not initialized".into())
+}
+
+// NEW: Git Pull
+#[command]
+pub fn git_pull(path: String, ssh_key_path: String) -> Result<String, String> {
+    let mut cmd = Command::new("git");
+    cmd.current_dir(&path);
+    cmd.arg("pull");
+    
+    if !ssh_key_path.trim().is_empty() {
+        #[cfg(target_os = "windows")]
+        let ssh_cmd = format!("ssh -i \"{}\"", ssh_key_path.replace("\\", "\\\\"));
+        #[cfg(not(target_os = "windows"))]
+        let ssh_cmd = format!("ssh -i \"{}\"", ssh_key_path);
+        cmd.env("GIT_SSH_COMMAND", ssh_cmd);
+    }
+    cmd.env("GIT_TERMINAL_PROMPT", "0");
+
+    let output = cmd.output().map_err(|e| format!("Git pull failed: {}", e))?;
+
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
+}
+
+// ... keep existing get_peers, request_join, approve_join, save_incoming_project ...
 
 #[command]
 pub fn get_peers(state: State<'_, PeerState>) -> Result<Vec<String>, String> {
@@ -116,7 +151,6 @@ pub async fn request_file_sync(
     tx.send(("request_sync".to_string(), Payload::RequestSync { path })).await.map_err(|e| e.to_string())
 }
 
-// NEW: Command to send raw file content
 #[command]
 pub async fn broadcast_file_content(
     path: String,
@@ -138,7 +172,7 @@ pub fn read_directory(path: String) -> Result<Vec<FileEntry>, String> {
         let file_name = path.file_name().into_string().map_err(|_| "Invalid UTF-8".to_string())?;
         let file_path = path.path().to_string_lossy().to_string();
         
-        if file_name.starts_with('.') { continue; }
+        if file_name.starts_with('.') && file_name != ".collab_meta.json" { continue; } // Allow meta file
 
         entries.push(FileEntry {
             name: file_name,
@@ -173,6 +207,11 @@ pub fn init_git_repo(path: String) -> Result<String, String> {
 
 #[command]
 pub fn write_file_content(path: String, content: String) -> Result<(), String> {
+    // UPDATED: Create parent directories if they don't exist
+    if let Some(parent) = Path::new(&path).parent() {
+        fs::create_dir_all(parent).ok(); 
+    }
+    
     fs::write(&path, content).map_err(|e| e.to_string())?;
 
     if let Ok(repo) = Repository::discover(&path) {
@@ -210,16 +249,12 @@ pub fn set_remote_origin(path: String, url: String) -> Result<String, String> {
 
 #[command]
 pub fn push_changes(path: String, ssh_key_path: String) -> Result<String, String> {
-    // 1. Commit Staged Changes (Fixes "Still not pushing" issue)
-    // Files are staged on save (in write_file_content), but we must commit them before pushing.
-    let mut commit_cmd = std::process::Command::new("git");
+    let mut commit_cmd = Command::new("git");
     commit_cmd.current_dir(&path);
-    // Suppress output, allow empty message. If nothing to commit, this fails harmlessly.
-    commit_cmd.args(&["commit", "-m", "Auto-sync on quit"]);
+    commit_cmd.args(&["commit", "-m", "Auto-sync"]);
     let _ = commit_cmd.output();
 
-    // 2. Push Changes
-    let mut cmd = std::process::Command::new("git");
+    let mut cmd = Command::new("git");
     cmd.current_dir(&path);
     cmd.arg("push");
     
@@ -231,7 +266,6 @@ pub fn push_changes(path: String, ssh_key_path: String) -> Result<String, String
         cmd.env("GIT_SSH_COMMAND", ssh_cmd);
     }
 
-    // FIX: Fail immediately if git asks for a password (prevents hang)
     cmd.env("GIT_TERMINAL_PROMPT", "0");
 
     let output = cmd.output().map_err(|e| format!("Git command failed: {}", e))?;

@@ -14,45 +14,33 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SlashMenu } from "./components/SlashMenu"; 
 import "./App.css";
 
-// Helper to get relative path for P2P sync ID
+const META_FILE = ".collab_meta.json";
+
 const getRelativePath = (root: string, file: string | null) => {
   if (!root || !file) return null;
   if (file.startsWith(root)) {
     let rel = file.substring(root.length);
-    // Remove leading slashes/backslashes
     if (rel.startsWith("/") || rel.startsWith("\\")) rel = rel.substring(1);
     return rel;
   }
-  return file; // Fallback
+  return file; 
 };
 
 function App() {
-  // State for folder management
   const [rootPath, setRootPath] = useState<string>("");
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
   const [fileSystemRefresh, setFileSystemRefresh] = useState(0);
-  
-  // Settings State
   const [showSettings, setShowSettings] = useState(false);
   const [sshKeyPath, setSshKeyPath] = useState(localStorage.getItem("sshKeyPath") || "");
   const [detectedRemote, setDetectedRemote] = useState("");
-  
-  // Warning & Status State
   const [warningMsg, setWarningMsg] = useState<string | null>(null);
   const [pendingQuit, setPendingQuit] = useState(false);
-  const [isPushing, setIsPushing] = useState(false); // New UI state
-  
-  // Sync State
+  const [isPushing, setIsPushing] = useState(false); 
   const [isSyncing, setIsSyncing] = useState(false);
   const syncReceivedRef = useRef(false); 
 
-  // Calculate relative path for the current session ID
   const relativeFilePath = getRelativePath(rootPath, currentFilePath);
-
-  // Pass the RELATIVE path to hooks so peers agree on ID
   const { editor, ydoc } = useCollaborativeEditor(currentFilePath, relativeFilePath);
-
-  // Refs
   const rootPathRef = useRef(rootPath);
   const sshKeyPathRef = useRef(sshKeyPath);
 
@@ -65,12 +53,10 @@ function App() {
     localStorage.setItem("sshKeyPath", sshKeyPath);
   }, [sshKeyPath]);
 
-  // Reset sync ref when file changes
   useEffect(() => {
     syncReceivedRef.current = false;
   }, [currentFilePath]);
 
-  // Callback: Host reads a file from disk to serve to a guest
   const getFileContent = useCallback(async (relativePath: string) => {
      if (!rootPath) throw new Error("No root path open");
      const sep = rootPath.includes("\\") ? "\\" : "/";
@@ -78,7 +64,6 @@ function App() {
      return await invoke<string>("read_file_content", { path: absPath });
   }, [rootPath]);
 
-  // Callback: Guest receives raw file content from Host
   const onFileContentReceived = useCallback((data: number[]) => {
       if (!editor) return;
       try {
@@ -100,13 +85,11 @@ function App() {
       }
   }, [editor]);
 
-  // Callback: Yjs Sync Received
   const onSyncReceived = useCallback(() => {
       setIsSyncing(false);
       syncReceivedRef.current = true;
   }, []);
 
-  // Define onProjectReceived logic
   const handleProjectReceived = useCallback(async (data: number[]) => {
     const destPath = prompt("You joined a session! Enter absolute path to clone the project folder:");
     if (destPath) {
@@ -126,9 +109,11 @@ function App() {
 
   const { 
     peers, 
+    myPeerId,
     incomingRequest, 
     isHost, 
-    status, 
+    status,
+    setStatus,
     sendJoinRequest, 
     acceptRequest, 
     rejectRequest,
@@ -142,7 +127,99 @@ function App() {
       onSyncReceived 
   );
 
-  // -- File Content Loading Logic --
+  // --- IMPROVED HOST NEGOTIATION LOGIC ---
+
+  const negotiateHost = async (retryCount = 0) => {
+    if (!rootPath || !myPeerId) return;
+    
+    setStatus(retryCount > 0 ? `Negotiating (Attempt ${retryCount + 1})...` : "Negotiating host...");
+    
+    const sep = rootPath.includes("\\") ? "\\" : "/";
+    const metaPath = `${rootPath}${sep}${META_FILE}`;
+    const ssh = sshKeyPathRef.current || "";
+
+    try {
+        // 1. Try to Pull (Ignore errors: it might be a new local folder)
+        try {
+            await invoke("git_pull", { path: rootPath, sshKeyPath: ssh });
+        } catch (e) {
+            console.log("Git pull skipped/failed (expected if new repo):", e);
+        }
+        
+        // 2. Read Meta File
+        let metaHost = "";
+        try {
+            const content = await invoke<string>("read_file_content", { path: metaPath });
+            const json = JSON.parse(content);
+            metaHost = json.hostId;
+        } catch (e) {
+            console.log("Meta file missing or invalid.");
+        }
+
+        // 3. Logic: Check if Host is Online
+        if (metaHost && metaHost !== myPeerId) {
+            const isOnline = peers.includes(metaHost);
+            if (isOnline) {
+                setStatus(`Found host ${metaHost.slice(0,8)}. Joining...`);
+                sendJoinRequest(metaHost);
+                return; // Logic ends here: we are a guest
+            } else {
+                setStatus(`Host ${metaHost.slice(0,8)} offline. Claiming host role...`);
+            }
+        }
+
+        // 4. Become Host (If no meta, or host offline, or I am host)
+        if (metaHost === myPeerId) {
+            setStatus("I am the host (verified).");
+            return; 
+        }
+
+        // Claim Host Role: Write ID to file
+        await invoke("write_file_content", { 
+            path: metaPath, 
+            content: JSON.stringify({ hostId: myPeerId }, null, 2) 
+        });
+
+        // 5. Commit and Push
+        try {
+            await invoke("push_changes", { path: rootPath, sshKeyPath: ssh });
+            setStatus("Host claimed and synced.");
+        } catch (e) {
+            console.error("Push failed:", e);
+            // RECURSIVE RETRY LOGIC
+            if (retryCount < 2) {
+                setStatus(`Push failed. Retrying... (${retryCount + 1}/2)`);
+                setTimeout(() => negotiateHost(retryCount + 1), 2000);
+            } else {
+                setWarningMsg("Could not sync host status to remote.\n\nRunning in offline/local host mode.");
+                setStatus("Host (Offline/Local)");
+            }
+        }
+
+    } catch (e) {
+        console.error("Negotiation fatal error:", e);
+    }
+  };
+
+  // Trigger negotiation on Open or Peer ID ready
+  useEffect(() => {
+    if (rootPath && myPeerId) {
+       negotiateHost();
+    }
+  }, [rootPath, myPeerId]); 
+
+  // Trigger negotiation if I suddenly become host (e.g. previous host disconnects)
+  const prevIsHost = useRef(isHost);
+  useEffect(() => {
+    if (!prevIsHost.current && isHost && rootPath) {
+        negotiateHost();
+    }
+    prevIsHost.current = isHost;
+  }, [isHost, rootPath]);
+
+
+  // --- EXISTING FUNCTIONALITY ---
+
   useEffect(() => {
     if (currentFilePath && editor) {
       const loadFromDisk = () => {
@@ -164,16 +241,9 @@ function App() {
 
       if (isHost) {
           if (peers.length > 0 && relativeFilePath) {
-              setIsSyncing(true);
-              requestSync(relativeFilePath);
               const timer = setTimeout(() => {
-                  if (!syncReceivedRef.current) {
-                      setIsSyncing(false);
-                      if (editor.getText().trim() === "") {
-                          loadFromDisk();
-                      }
-                  }
-              }, 250); 
+                   if (editor.getText().trim() === "") loadFromDisk();
+              }, 500);
               return () => clearTimeout(timer);
           } else {
               loadFromDisk();
@@ -189,7 +259,6 @@ function App() {
     }
   }, [currentFilePath, editor, peers.length, relativeFilePath, isHost, ydoc]); 
 
-  // -- Auto-detect Remote Logic --
   useEffect(() => {
     if (showSettings && rootPath) {
       invoke<string>("get_remote_origin", { path: rootPath })
@@ -198,7 +267,6 @@ function App() {
     }
   }, [showSettings, rootPath]);
 
-  // -- Window Close Listener --
   useEffect(() => {
     const win = getCurrentWindow();
     const unlisten = win.onCloseRequested(async (event) => {
@@ -207,13 +275,8 @@ function App() {
 
       if (currentRoot && !pendingQuit) {
         event.preventDefault(); 
-        
-        // UI Feedback: Show user we are working
         setIsPushing(true);
-        console.log("Window close requested. Attempting push...");
-
         try {
-          // NOTE: sshKeyPath is passed even if empty (safe for agent usage)
           await invoke("push_changes", { path: currentRoot, sshKeyPath: currentSsh || "" });
           await win.destroy();
         } catch (e: any) {
@@ -225,24 +288,12 @@ function App() {
          event.preventDefault();
       }
     });
-
     return () => { unlisten.then(f => f()); };
   }, [pendingQuit]);
 
-  // -- Logic --
-
-  const pushChanges = async (path: string) => {
-    try {
-      await invoke<string>("push_changes", { path, sshKeyPath: sshKeyPath || "" });
-    } catch (e: any) {
-      setWarningMsg(`Push failed: ${e}`);
-      throw e; 
-    }
-  };
-
   const handleOpenFolder = async () => {
     if (rootPath) {
-      try { await pushChanges(rootPath); } catch (e) { return; }
+      try { await invoke("push_changes", { path: rootPath, sshKeyPath: sshKeyPath || "" }); } catch (e) { return; }
     }
 
     const path = prompt("Enter absolute folder path to open:");
@@ -250,7 +301,6 @@ function App() {
       setRootPath(path);
       setFileSystemRefresh(prev => prev + 1);
       setDetectedRemote("");
-
       try {
         await invoke<string>("init_git_repo", { path });
         const remote = await invoke<string>("get_remote_origin", { path });
@@ -341,7 +391,6 @@ function App() {
       />
 
       <div className="main-workspace">
-        {/* Sync/Push Overlay */}
         {(isSyncing || isPushing) && (
           <div style={{
             position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
@@ -382,10 +431,7 @@ function App() {
              {editor && <SlashMenu editor={editor} />}
 
             {editor && (
-              <BubbleMenu 
-                className="bubble-menu" 
-                editor={editor}
-              >
+              <BubbleMenu className="bubble-menu" editor={editor}>
                 <button onClick={() => editor.chain().focus().toggleBold().run()} className={editor.isActive('bold') ? 'is-active' : ''}>Bold</button>
                 <button onClick={() => editor.chain().focus().toggleItalic().run()} className={editor.isActive('italic') ? 'is-active' : ''}>Italic</button>
                 <button onClick={() => editor.chain().focus().toggleCode().run()} className={editor.isActive('code') ? 'is-active' : ''}>Code</button>

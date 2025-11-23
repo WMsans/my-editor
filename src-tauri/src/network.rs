@@ -57,6 +57,12 @@ pub async fn start_p2p_node(
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
 
+    // NEW: Capture and emit local Peer ID
+    let local_peer_id = swarm.local_peer_id().to_string();
+    println!("Local Peer ID: {}", local_peer_id);
+    *state.local_peer_id.lock().unwrap() = Some(local_peer_id.clone());
+    let _ = app_handle.emit("local-peer-id", local_peer_id);
+
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
 
     let mut current_host: Option<PeerId> = None;

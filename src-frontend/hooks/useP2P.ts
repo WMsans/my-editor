@@ -1,3 +1,4 @@
+//
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -9,20 +10,24 @@ export function useP2P(
   onProjectReceived: (data: number[]) => void,
   getFileContent: (path: string) => Promise<string>,
   onFileContentReceived: (data: number[]) => void,
-  // NEW: Callback when Yjs sync data is received
   onSyncReceived?: () => void
 ) {
   const [peers, setPeers] = useState<string[]>([]);
+  // NEW
+  const [myPeerId, setMyPeerId] = useState<string | null>(null);
   const [incomingRequest, setIncomingRequest] = useState<string | null>(null);
   const [isHost, setIsHost] = useState(true);
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState("Initializing...");
 
   useEffect(() => {
     invoke<string[]>("get_peers").then((current) => {
       setPeers((prev) => [...new Set([...prev, ...current])]);
     });
+    // NEW
+    invoke<string>("get_local_peer_id").then(setMyPeerId).catch(() => {});
 
     const listeners = [
+      listen<string>("local-peer-id", (e) => setMyPeerId(e.payload)), // ADDED
       listen<string>("peer-discovered", (e) => setPeers((prev) => [...new Set([...prev, e.payload])])),
       listen<string>("peer-expired", (e) => setPeers((prev) => prev.filter((p) => p !== e.payload))),
       listen<string>("join-requested", (e) => {
@@ -35,37 +40,32 @@ export function useP2P(
         setStatus("Joined session! Folder synced.");
       }),
       listen<string>("host-disconnected", (e) => {
-        setStatus(`⚠ Host ${e.payload.slice(0, 8)} disconnected!`);
-        setIsHost(true);
+        // Updated to generic message, logic moved to App.tsx
+        setStatus(`⚠ Host disconnected! Negotiating...`);
+        setIsHost(true); // Default back to host role until we rejoin or claim
       }),
-      // Listen for sync events
+      // ... existing sync listeners ...
       listen<{ path: string, data: number[] }>("p2p-sync", (e) => {
         if (currentRelativePath && e.payload.path === currentRelativePath) {
             Y.applyUpdate(ydoc, new Uint8Array(e.payload.data));
-            // Notify that sync occurred
             if (onSyncReceived) onSyncReceived();
         }
       }),
-      // Listen for raw file content (Host sent file from disk)
       listen<{ path: string, data: number[] }>("p2p-file-content", (e) => {
         if (currentRelativePath && e.payload.path === currentRelativePath) {
            onFileContentReceived(e.payload.data);
         }
       }),
-      // Listen for peers requesting the state of a file
       listen<{ path: string }>("sync-requested", async (e) => {
+        // ... existing sync logic ...
         const requestedPath = e.payload.path;
-        
-        // 1. If we have the file open (in YDoc), send the YDoc state
         if (currentRelativePath && requestedPath === currentRelativePath) {
             const state = Y.encodeStateAsUpdate(ydoc);
             invoke("broadcast_update", { 
                 path: currentRelativePath, 
                 data: Array.from(state) 
             }).catch(console.error);
-        } 
-        // 2. If we don't have it open, try to read it from disk and send raw content
-        else {
+        } else {
             try {
                 const content = await getFileContent(requestedPath);
                 const data = Array.from(new TextEncoder().encode(content));
@@ -83,7 +83,7 @@ export function useP2P(
     return () => {
       listeners.forEach((l) => l.then((unlisten) => unlisten()));
     };
-  }, [ydoc, onProjectReceived, currentRelativePath, getFileContent, onFileContentReceived, onSyncReceived]);
+}, [ydoc, onProjectReceived, currentRelativePath, getFileContent, onFileContentReceived, onSyncReceived]);
 
   const sendJoinRequest = async (peerId: string) => {
     try {
@@ -124,9 +124,11 @@ export function useP2P(
 
   return {
     peers,
+    myPeerId, // Return this
     incomingRequest,
     isHost,
     status,
+    setStatus, // Return this setter so App.tsx can update status
     sendJoinRequest,
     acceptRequest,
     rejectRequest,
