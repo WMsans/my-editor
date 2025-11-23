@@ -77,19 +77,10 @@ function App() {
   const onFileContentReceived = useCallback((data: number[]) => {
       if (!editor) return;
 
-      // FIX: If we have already synced/edited this file, ignore the incoming "init" content
-      // from the Host (which is likely just the disk version) and send them OUR latest state.
-      if (syncReceivedRef.current) {
-          console.log("Preserving local edits against Host disk load. Sending update to Host.");
-          if (ydoc && relativeFilePath) {
-             const state = Y.encodeStateAsUpdate(ydoc);
-             invoke("broadcast_update", { 
-                path: relativeFilePath, 
-                data: Array.from(state) 
-             }).catch(console.error);
-          }
-          return;
-      }
+      // REMOVED: The logic that preserved local edits against Host disk load.
+      // This caused duplication because the Guest would reject the Host's "Reset"
+      // and instead push back its own state (with old IDs) which the Host would merge.
+      // Now, Guests implicitly accept the Host's authoritative state when sent.
 
       try {
           const content = new TextDecoder().decode(new Uint8Array(data));
@@ -312,7 +303,10 @@ function App() {
           invoke<string>("read_file_content", { path: currentFilePath })
             .then((content) => {
               
-              if (isHost) suppressBroadcastRef.current = true;
+              // MODIFIED: Do NOT suppress broadcast for Host. 
+              // We want the setContent (loading from disk) to generate a Yjs Update 
+              // that propagates the correct ClientIDs to the Guests.
+              // if (isHost) suppressBroadcastRef.current = true;
 
               try {
                 const jsonContent = JSON.parse(content);
@@ -325,15 +319,20 @@ function App() {
                 editor.commands.setContent(content, { contentType: 'markdown' });
               }
               
-              if (isHost) suppressBroadcastRef.current = false;
+              // if (isHost) suppressBroadcastRef.current = false;
               
               setIsSyncing(false); 
 
+              // MODIFIED: Do not broadcast raw file content as text.
+              // The setContent above will trigger a `broadcast_update` (via Yjs)
+              // which keeps all peers in sync with the correct IDs.
+              /*
               if (isHost && relativeFilePath) {
                  const bytes = Array.from(new TextEncoder().encode(content));
                  invoke("broadcast_file_content", { path: relativeFilePath, data: bytes })
                     .catch(e => console.error("Failed to broadcast init content", e));
               }
+              */
             })
             .catch((e) => {
                 setWarningMsg("Error opening file: " + e);

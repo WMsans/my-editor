@@ -68,11 +68,15 @@ export function useP2P(
             // FIX: Allow Host to also clear their doc if they are receiving 
             // the first sync packet (e.g., a full state push from a Guest).
             if (!hasSyncedRef.current) {
-                try {
-                    const fragment = ydoc.getXmlFragment("default");
-                    fragment.delete(0, fragment.length);
-                } catch (e) {
-                    console.error("Failed to clear YDoc:", e);
+                // Modified: Only clear if we are NOT the host. 
+                // The Host has authoritative content and should not be wiped by an incoming update.
+                if (!isHostRef.current) {
+                    try {
+                        const fragment = ydoc.getXmlFragment("default");
+                        fragment.delete(0, fragment.length);
+                    } catch (e) {
+                        console.error("Failed to clear YDoc:", e);
+                    }
                 }
                 hasSyncedRef.current = true;
             }
