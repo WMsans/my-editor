@@ -10,8 +10,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { registry } from "../mod-engine/Registry";
 import "../mods/SimulationBlock"; 
 
-// We accept currentFilePath to force editor recreation, 
-// and channelId (relative path) for the broadcast topic.
 export function useCollaborativeEditor(currentFilePath: string | null, channelId: string | null) {
   
   // Create a fresh YDoc when the file path changes
@@ -29,13 +27,17 @@ export function useCollaborativeEditor(currentFilePath: string | null, channelId
       ...registry.getExtensions()
     ],
     editorProps: { attributes: { class: "editor-content" } },
-  }, [currentFilePath, ydoc]); // Re-create editor when file changes
+  }, [currentFilePath, ydoc]);
 
   // Broadcast updates using the RELATIVE path (channelId)
   useEffect(() => {
     if (!channelId) return;
 
-    const handleUpdate = (update: Uint8Array) => {
+    // Check the 'origin' of the update
+    const handleUpdate = (update: Uint8Array, origin: any) => {
+      // FIX: If the update came from 'p2p' (applied by useP2P), do NOT broadcast it back.
+      if (origin === 'p2p') return;
+
       invoke("broadcast_update", { 
         path: channelId, 
         data: Array.from(update) 

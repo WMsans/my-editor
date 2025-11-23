@@ -250,14 +250,29 @@ function App() {
               } catch (e) {
                 editor.commands.setContent(content, { contentType: 'markdown' });
               }
+              setIsSyncing(false); // Ensure overlay is removed
             })
-            .catch((e) => setWarningMsg("Error opening file: " + e));
+            .catch((e) => {
+                setWarningMsg("Error opening file: " + e);
+                setIsSyncing(false);
+            });
       };
 
       if (isHost) {
           if (peers.length > 0 && relativeFilePath) {
+              // Host attempts to sync from potential guests first
+              setIsSyncing(true);
+              requestSync(relativeFilePath);
+
               const timer = setTimeout(() => {
-                   if (editor.getText().trim() === "") loadFromDisk();
+                   // Only load from disk if we haven't received a sync from a guest
+                   if (!syncReceivedRef.current) {
+                       // Check if empty is optional, but safer to just load if no sync arrived
+                       loadFromDisk();
+                   } else {
+                       // Sync received, ensure overlay is off
+                       setIsSyncing(false);
+                   }
               }, 500);
               return () => clearTimeout(timer);
           } else {
@@ -272,7 +287,7 @@ function App() {
           }
       }
     }
-  }, [currentFilePath, editor, peers.length, relativeFilePath, isHost, ydoc]); 
+  }, [currentFilePath, editor, peers.length, relativeFilePath, isHost, ydoc]);
 
   useEffect(() => {
     if (showSettings && rootPath) {
