@@ -12,7 +12,6 @@ export function useP2P(
   onFileContentReceived: (data: number[]) => void,
   onSyncReceived?: () => void
 ) {
-  const [peers, setPeers] = useState<string[]>([]);
   const [myPeerId, setMyPeerId] = useState<string | null>(null);
   const [incomingRequest, setIncomingRequest] = useState<string | null>(null);
   const [isHost, setIsHost] = useState(true);
@@ -32,15 +31,10 @@ export function useP2P(
   }, [currentRelativePath]);
 
   useEffect(() => {
-    invoke<string[]>("get_peers").then((current) => {
-      setPeers((prev) => [...new Set([...prev, ...current])]);
-    });
     invoke<string>("get_local_peer_id").then(setMyPeerId).catch(() => {});
 
     const listeners = [
       listen<string>("local-peer-id", (e) => setMyPeerId(e.payload)),
-      listen<string>("peer-discovered", (e) => setPeers((prev) => [...new Set([...prev, e.payload])])),
-      listen<string>("peer-expired", (e) => setPeers((prev) => prev.filter((p) => p !== e.payload))),
       listen<string>("join-requested", (e) => {
         setIncomingRequest(e.payload);
         setStatus(`Incoming request from ${e.payload.slice(0, 8)}...`);
@@ -54,7 +48,6 @@ export function useP2P(
       listen<string>("host-disconnected", (e) => {
         setStatus(`⚠ Host disconnected! Negotiating...`);
         // FIX: Immediately remove the disconnected host from peers so negotiation knows they are offline
-        setPeers((prev) => prev.filter((p) => p !== e.payload));
         setIsHost(true); // Failover to host mode
       }),
       
@@ -160,7 +153,6 @@ export function useP2P(
   };
 
   return {
-    peers,
     myPeerId,
     incomingRequest,
     isHost,

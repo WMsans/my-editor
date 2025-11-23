@@ -80,11 +80,7 @@ pub fn git_pull(path: String, ssh_key_path: String) -> Result<String, String> {
 
 // ... keep existing get_peers, request_join, approve_join, save_incoming_project ...
 
-#[command]
-pub fn get_peers(state: State<'_, PeerState>) -> Result<Vec<String>, String> {
-    let peers = state.peers.lock().map_err(|e| e.to_string())?;
-    Ok(peers.iter().cloned().collect())
-}
+
 
 #[command]
 pub async fn request_join(

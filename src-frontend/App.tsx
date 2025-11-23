@@ -4,7 +4,6 @@ import { EditorContent } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus" 
 import { useCollaborativeEditor } from "./hooks/useCollaborativeEditor";
 import { useP2P } from "./hooks/useP2P";
-import { PeerList } from "./components/PeerList";
 import { IncomingRequest } from "./components/IncomingRequest";
 import { FileExplorer } from "./components/FileExplorer";
 import { MenuBar } from "./components/MenuBar";
@@ -140,7 +139,6 @@ function App() {
   }, []);
 
   const { 
-    peers, 
     myPeerId,
     incomingRequest, 
     isHost, 
@@ -203,15 +201,10 @@ function App() {
 
         // 3. Logic: Check if Host is Online
         if (metaHost && metaHost !== myPeerId) {
-            const isOnline = peers.includes(metaHost);
-            if (isOnline) {
-                setStatus(`Found host ${metaHost.slice(0,8)}. Joining...`);
-                isAutoJoining.current = true; // Set flag to suppress clone prompt
-                sendJoinRequest(metaHost);
-                return; // Logic ends here: we are a guest
-            } else {
-                setStatus(`Host ${metaHost.slice(0,8)} offline. Claiming host role...`);
-            }
+            setStatus(`Found host ${metaHost.slice(0,8)}. Joining...`);
+            isAutoJoining.current = true; // Set flag to suppress clone prompt
+            sendJoinRequest(metaHost);
+            return; // Logic ends here: we are a guest
         }
 
         // 4. Become Host (If no meta, or host offline, or I am host)
@@ -290,27 +283,9 @@ function App() {
       };
 
       if (isHost) {
-          if (peers.length > 0 && relativeFilePath) {
-              // Host attempts to sync from potential guests first
-              setIsSyncing(true);
-              requestSync(relativeFilePath);
-
-              const timer = setTimeout(() => {
-                   // Only load from disk if we haven't received a sync from a guest
-                   if (!syncReceivedRef.current) {
-                       // Check if empty is optional, but safer to just load if no sync arrived
-                       loadFromDisk();
-                   } else {
-                       // Sync received, ensure overlay is off
-                       setIsSyncing(false);
-                   }
-              }, 500);
-              return () => clearTimeout(timer);
-          } else {
-              loadFromDisk();
-          }
+        loadFromDisk();
       } else {
-          if (peers.length > 0 && relativeFilePath) {
+          if (relativeFilePath) {
               setIsSyncing(true);
               requestSync(relativeFilePath);
           } else {
@@ -318,7 +293,7 @@ function App() {
           }
       }
     }
-  }, [currentFilePath, editor, peers.length, relativeFilePath, isHost, ydoc]);
+  }, [currentFilePath, editor, relativeFilePath, isHost, ydoc]);
 
   useEffect(() => {
     if (showSettings && rootPath) {
@@ -490,7 +465,6 @@ function App() {
            <div className="p2p-panel">
               <h3>P2P Status: {isHost ? "Host" : "Guest"}</h3>
               <p className="status-text">{status}</p>
-              <PeerList peers={peers} onJoin={sendJoinRequest} />
               {incomingRequest && (
                 <IncomingRequest 
                   peerId={incomingRequest} 

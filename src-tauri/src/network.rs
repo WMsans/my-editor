@@ -1,7 +1,7 @@
 use tauri::{AppHandle, Emitter};
 use std::time::Duration;
 use libp2p::{
-    mdns, noise, tcp, yamux,
+    noise, tcp, yamux,
     swarm::{NetworkBehaviour, SwarmEvent},
     SwarmBuilder, PeerId, StreamProtocol,
     request_response::{self, ProtocolSupport},
@@ -15,7 +15,6 @@ use crate::state::PeerState;
 
 #[derive(NetworkBehaviour)]
 struct MyBehaviour {
-    mdns: mdns::tokio::Behaviour,
     request_response: request_response::json::Behaviour<AppRequest, AppResponse>,
 }
 
@@ -46,13 +45,12 @@ pub async fn start_p2p_node(
     let mut swarm = SwarmBuilder::with_new_identity()
         .with_tokio()
         .with_tcp(tcp::Config::default(), noise::Config::new, yamux::Config::default)?
-        .with_behaviour(|key| {
-            let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id())?;
+        .with_behaviour(|_key| {
             let request_response = request_response::json::Behaviour::new(
                 [(StreamProtocol::new("/collab/1.0.0"), ProtocolSupport::Full)],
                 request_response::Config::default()
             );
-            Ok(MyBehaviour { mdns, request_response })
+            Ok(MyBehaviour { request_response })
         })?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
@@ -156,19 +154,6 @@ pub async fn start_p2p_node(
             
             event = swarm.select_next_some() => {
                 match event {
-                    SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
-                        for (peer_id, _) in list {
-                            state.peers.lock().unwrap().insert(peer_id.to_string());
-                            let _ = app_handle.emit("peer-discovered", peer_id.to_string());
-                        }
-                    },
-                    SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
-                        for (peer_id, _) in list {
-                            state.peers.lock().unwrap().remove(&peer_id.to_string());
-                            let _ = app_handle.emit("peer-expired", peer_id.to_string());
-                        }
-                    },
-
                     SwarmEvent::Behaviour(MyBehaviourEvent::RequestResponse(request_response::Event::Message { 
                         peer, message: request_response::Message::Request { request, channel, .. }, ..
                     })) => {

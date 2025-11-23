@@ -3,7 +3,6 @@ mod state;
 mod network;
 mod commands;
 
-use tauri::{Manager, State};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use crate::state::PeerState;
@@ -32,7 +31,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::get_peers,
             commands::request_join,
             commands::approve_join,
             commands::broadcast_update,
