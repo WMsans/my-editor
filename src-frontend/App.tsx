@@ -40,6 +40,9 @@ function App() {
   // Warning State
   const [warningMsg, setWarningMsg] = useState<string | null>(null);
   const [pendingQuit, setPendingQuit] = useState(false);
+  
+  // Sync State for Guest
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Calculate relative path for the current session ID
   const relativeFilePath = getRelativePath(rootPath, currentFilePath);
@@ -110,25 +113,31 @@ function App() {
             .catch((e) => setWarningMsg("Error opening file: " + e));
       };
 
-      // If we are connected to peers, try to get the collaborative state first.
-      // This prevents us from loading local content (inserting it) and duplicating what the host has.
-      if (peers.length > 0 && relativeFilePath) {
-          requestSync(relativeFilePath);
-          
-          // Give peers a short window to respond. If editor remains empty, fall back to disk.
-          const timer = setTimeout(() => {
-              const docSize = ydoc.share.get('default') ? 1 : 0; // Crude check, or check chars
-              // Better check: if the doc is empty string
-              if (editor.getText().trim() === "") {
-                  loadFromDisk();
-              }
-          }, 500);
-          return () => clearTimeout(timer);
-      } else {
+      if (isHost) {
+          // Host: Load immediately from disk. No waiting.
           loadFromDisk();
+      } else {
+          // Guest: Request sync and substitute content via Yjs update.
+          if (peers.length > 0 && relativeFilePath) {
+              setIsSyncing(true);
+              requestSync(relativeFilePath);
+              
+              // Detection logic: When we receive an update, sync is "complete"
+              const handleUpdate = () => {
+                  setIsSyncing(false);
+              };
+              
+              ydoc.on('update', handleUpdate);
+              return () => {
+                  ydoc.off('update', handleUpdate);
+              };
+          } else {
+              // No peers connected, fallback to local disk
+              loadFromDisk();
+          }
       }
     }
-  }, [currentFilePath, editor, peers.length, relativeFilePath]); 
+  }, [currentFilePath, editor, peers.length, relativeFilePath, isHost, ydoc]); 
 
   // -- Auto-detect Remote Logic --
   useEffect(() => {
@@ -299,6 +308,16 @@ function App() {
         </aside>
 
         <main className="editor-container">
+          {isSyncing && (
+            <div style={{
+              position: 'absolute', top: 0, left: 0, right: 0, 
+              padding: '5px', background: '#89b4fa', color: '#1e1e2e', 
+              textAlign: 'center', zIndex: 10, fontSize: '0.9rem'
+            }}>
+              Syncing content from host...
+            </div>
+          )}
+          
           <div className="editor-scroll-area">
              {editor && <SlashMenu editor={editor} />}
 
