@@ -5,8 +5,12 @@ import * as Y from "yjs";
 
 export function useP2P(
   ydoc: Y.Doc, 
-  currentRelativePath: string | null, // Use relative path for matching
-  onProjectReceived: (data: number[]) => void
+  currentRelativePath: string | null, 
+  onProjectReceived: (data: number[]) => void,
+  // Callback to get file content from disk (for Host)
+  getFileContent: (path: string) => Promise<string>,
+  // Callback to handle receiving file content (for Guest)
+  onFileContentReceived: (data: number[]) => void
 ) {
   const [peers, setPeers] = useState<string[]>([]);
   const [incomingRequest, setIncomingRequest] = useState<string | null>(null);
@@ -34,22 +38,42 @@ export function useP2P(
         setStatus(`⚠ Host ${e.payload.slice(0, 8)} disconnected!`);
         setIsHost(true);
       }),
-      // Listen for sync events
+      // Listen for sync events (YJS updates)
       listen<{ path: string, data: number[] }>("p2p-sync", (e) => {
-        // Filter: Only apply if the incoming path (relative) matches our current open file (relative)
         if (currentRelativePath && e.payload.path === currentRelativePath) {
             Y.applyUpdate(ydoc, new Uint8Array(e.payload.data));
         }
       }),
-      // NEW: Listen for peers requesting the state of a file
-      listen<{ path: string }>("sync-requested", (e) => {
+      // NEW: Listen for raw file content (Host sent file from disk)
+      listen<{ path: string, data: number[] }>("p2p-file-content", (e) => {
         if (currentRelativePath && e.payload.path === currentRelativePath) {
-            // Encode the ENTIRE state as an update to bring the peer up to speed
+           onFileContentReceived(e.payload.data);
+        }
+      }),
+      // Listen for peers requesting the state of a file
+      listen<{ path: string }>("sync-requested", async (e) => {
+        const requestedPath = e.payload.path;
+        
+        // 1. If we have the file open (in YDoc), send the YDoc state
+        if (currentRelativePath && requestedPath === currentRelativePath) {
             const state = Y.encodeStateAsUpdate(ydoc);
             invoke("broadcast_update", { 
                 path: currentRelativePath, 
                 data: Array.from(state) 
             }).catch(console.error);
+        } 
+        // 2. If we don't have it open, try to read it from disk and send raw content
+        else {
+            try {
+                const content = await getFileContent(requestedPath);
+                const data = Array.from(new TextEncoder().encode(content));
+                invoke("broadcast_file_content", {
+                    path: requestedPath,
+                    data: data
+                });
+            } catch (err) {
+                console.error(`Could not sync requested file ${requestedPath}:`, err);
+            }
         }
       })
     ];
@@ -57,7 +81,7 @@ export function useP2P(
     return () => {
       listeners.forEach((l) => l.then((unlisten) => unlisten()));
     };
-  }, [ydoc, onProjectReceived, currentRelativePath]);
+  }, [ydoc, onProjectReceived, currentRelativePath, getFileContent, onFileContentReceived]);
 
   const sendJoinRequest = async (peerId: string) => {
     try {
@@ -104,6 +128,6 @@ export function useP2P(
     sendJoinRequest,
     acceptRequest,
     rejectRequest,
-    requestSync // Exported
+    requestSync 
   };
 }

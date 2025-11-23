@@ -107,7 +107,6 @@ pub async fn broadcast_update(
     tx.send(("sync".to_string(), Payload::SyncData { path, data })).await.map_err(|e| e.to_string())
 }
 
-// NEW: Request sync for a specific file
 #[command]
 pub async fn request_file_sync(
     path: String,
@@ -115,6 +114,17 @@ pub async fn request_file_sync(
 ) -> Result<(), String> {
     let tx = sender.lock().await;
     tx.send(("request_sync".to_string(), Payload::RequestSync { path })).await.map_err(|e| e.to_string())
+}
+
+// NEW: Command to send raw file content
+#[command]
+pub async fn broadcast_file_content(
+    path: String,
+    data: Vec<u8>,
+    sender: SenderState<'_>
+) -> Result<(), String> {
+    let tx = sender.lock().await;
+    tx.send(("file_content".to_string(), Payload::FileContent { path, data })).await.map_err(|e| e.to_string())
 }
 
 #[command]

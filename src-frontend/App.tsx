@@ -41,7 +41,7 @@ function App() {
   const [warningMsg, setWarningMsg] = useState<string | null>(null);
   const [pendingQuit, setPendingQuit] = useState(false);
   
-  // Sync State for Guest
+  // Sync State
   const [isSyncing, setIsSyncing] = useState(false);
 
   // Calculate relative path for the current session ID
@@ -63,6 +63,37 @@ function App() {
     localStorage.setItem("sshKeyPath", sshKeyPath);
   }, [sshKeyPath]);
 
+  // Callback: Host reads a file from disk to serve to a guest
+  const getFileContent = useCallback(async (relativePath: string) => {
+     if (!rootPath) throw new Error("No root path open");
+     // Simple heuristic to guess separator. 
+     const sep = rootPath.includes("\\") ? "\\" : "/";
+     const absPath = `${rootPath}${sep}${relativePath}`;
+     return await invoke<string>("read_file_content", { path: absPath });
+  }, [rootPath]);
+
+  // Callback: Guest receives raw file content from Host
+  const onFileContentReceived = useCallback((data: number[]) => {
+      if (!editor) return;
+      try {
+          const content = new TextDecoder().decode(new Uint8Array(data));
+          try {
+            const jsonContent = JSON.parse(content);
+            if (jsonContent.type === 'doc' && Array.isArray(jsonContent.content)) {
+              editor.commands.setContent(jsonContent);
+            } else {
+              editor.commands.setContent(content, { contentType: 'markdown' });
+            }
+          } catch (e) {
+            editor.commands.setContent(content, { contentType: 'markdown' });
+          }
+          // Turn off syncing flag since we received content
+          setIsSyncing(false);
+      } catch (e) {
+          console.error("Failed to set content", e);
+      }
+  }, [editor]);
+
   // Define onProjectReceived logic
   const handleProjectReceived = useCallback(async (data: number[]) => {
     const destPath = prompt("You joined a session! Enter absolute path to clone the project folder:");
@@ -81,7 +112,7 @@ function App() {
     }
   }, []);
 
-  // Pass RELATIVE path to P2P hook
+  // Pass RELATIVE path and callbacks to P2P hook
   const { 
     peers, 
     incomingRequest, 
@@ -91,7 +122,13 @@ function App() {
     acceptRequest, 
     rejectRequest,
     requestSync
-  } = useP2P(ydoc, relativeFilePath, handleProjectReceived);
+  } = useP2P(
+      ydoc, 
+      relativeFilePath, 
+      handleProjectReceived,
+      getFileContent, 
+      onFileContentReceived
+  );
 
   // -- File Content Loading Logic --
   useEffect(() => {
@@ -114,15 +151,16 @@ function App() {
       };
 
       if (isHost) {
-          // Host: Load immediately from disk. No waiting.
+          // Host: Load immediately from disk.
           loadFromDisk();
       } else {
-          // Guest: Request sync and substitute content via Yjs update.
+          // Guest: Request sync 
           if (peers.length > 0 && relativeFilePath) {
               setIsSyncing(true);
               requestSync(relativeFilePath);
               
-              // Detection logic: When we receive an update, sync is "complete"
+              // Detection logic: Sync completes when we receive YJS update OR file content.
+              // YJS update triggers ydoc.on('update'), which we listen to here.
               const handleUpdate = () => {
                   setIsSyncing(false);
               };
@@ -132,7 +170,6 @@ function App() {
                   ydoc.off('update', handleUpdate);
               };
           } else {
-              // No peers connected, fallback to local disk
               loadFromDisk();
           }
       }
@@ -317,7 +354,7 @@ function App() {
               Syncing content from host...
             </div>
           )}
-          
+
           <div className="editor-scroll-area">
              {editor && <SlashMenu editor={editor} />}
 

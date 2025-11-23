@@ -9,9 +9,9 @@ pub struct FileSyncEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AppRequest {
     Join { username: String },
-    // Added path to Sync request
     Sync { path: String, data: Vec<u8> },
-    // NEW: Request full state for a file
+    // Added FileContent request
+    FileContent { path: String, data: Vec<u8> },
     RequestSync { path: String },
     Ping,
 }
@@ -27,8 +27,8 @@ pub enum AppResponse {
 pub enum Payload {
     PeerId(String),
     JoinAccept { peer_id: String, content: Vec<u8> },
-    // Changed SyncData to struct variant with path
     SyncData { path: String, data: Vec<u8> },
-    // NEW: Command payload
+    // Added FileContent payload
+    FileContent { path: String, data: Vec<u8> },
     RequestSync { path: String },
 }

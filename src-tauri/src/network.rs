@@ -25,10 +25,16 @@ struct SyncEvent {
     data: Vec<u8>,
 }
 
-// NEW: Event for when a peer requests the file state
 #[derive(Serialize, Clone)]
 struct SyncRequestEvent {
     path: String,
+}
+
+// NEW: Event for raw file content
+#[derive(Serialize, Clone)]
+struct FileContentEvent {
+    path: String,
+    data: Vec<u8>,
 }
 
 pub async fn start_p2p_node(
@@ -103,7 +109,6 @@ pub async fn start_p2p_node(
                             );
                         }
                     },
-                    // NEW: Handle RequestSync command from frontend
                     ("request_sync", Payload::RequestSync { path }) => {
                         let targets: Vec<String> = state.active_peers.lock().unwrap().iter().cloned().collect();
                          for peer_str in targets {
@@ -118,6 +123,24 @@ pub async fn start_p2p_node(
                             swarm.behaviour_mut().request_response.send_request(
                                 &host,
                                 AppRequest::RequestSync { path: path.clone() }
+                            );
+                        }
+                    },
+                    // NEW: Send File Content
+                    ("file_content", Payload::FileContent { path, data }) => {
+                        let targets: Vec<String> = state.active_peers.lock().unwrap().iter().cloned().collect();
+                        for peer_str in targets {
+                            if let Ok(peer) = peer_str.parse::<PeerId>() {
+                                swarm.behaviour_mut().request_response.send_request(
+                                    &peer,
+                                    AppRequest::FileContent { path: path.clone(), data: data.clone() }
+                                );
+                            }
+                        }
+                         if let Some(host) = current_host {
+                            swarm.behaviour_mut().request_response.send_request(
+                                &host,
+                                AppRequest::FileContent { path: path.clone(), data: data.clone() }
                             );
                         }
                     },
@@ -153,9 +176,13 @@ pub async fn start_p2p_node(
                                 let _ = app_handle.emit("p2p-sync", SyncEvent { path, data });
                                 let _ = swarm.behaviour_mut().request_response.send_response(channel, AppResponse::Ack);
                             },
-                            // NEW: Handle Sync Request
                             AppRequest::RequestSync { path } => {
                                 let _ = app_handle.emit("sync-requested", SyncRequestEvent { path });
+                                let _ = swarm.behaviour_mut().request_response.send_response(channel, AppResponse::Ack);
+                            },
+                            // NEW: Handle File Content
+                            AppRequest::FileContent { path, data } => {
+                                let _ = app_handle.emit("p2p-file-content", FileContentEvent { path, data });
                                 let _ = swarm.behaviour_mut().request_response.send_response(channel, AppResponse::Ack);
                             },
                             AppRequest::Ping => {
