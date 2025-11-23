@@ -17,13 +17,19 @@ export function useP2P(
   const [incomingRequest, setIncomingRequest] = useState<string | null>(null);
   const [isHost, setIsHost] = useState(true);
   const [status, setStatus] = useState("Initializing...");
-  const [isJoining, setIsJoining] = useState(false); // [!code ++]
+  const [isJoining, setIsJoining] = useState(false);
   
   // Ref to track host status inside listeners
   const isHostRef = useRef(isHost);
   useEffect(() => {
     isHostRef.current = isHost;
   }, [isHost]);
+
+  // NEW: Track if we have synced the current file to avoid merging local "noise" with remote "truth"
+  const hasSyncedRef = useRef(false);
+  useEffect(() => {
+    hasSyncedRef.current = false;
+  }, [currentRelativePath]);
 
   useEffect(() => {
     invoke<string[]>("get_peers").then((current) => {
@@ -42,7 +48,7 @@ export function useP2P(
       listen<number[]>("join-accepted", (e) => {
         onProjectReceived(e.payload);
         setIsHost(false);
-        setIsJoining(false); // [!code ++]
+        setIsJoining(false);
         setStatus("Joined session! Folder synced.");
       }),
       listen<string>("host-disconnected", (e) => {
@@ -56,6 +62,17 @@ export function useP2P(
       
       listen<{ path: string, data: number[] }>("p2p-sync", (e) => {
         if (currentRelativePath && e.payload.path === currentRelativePath) {
+            // New Logic: Use the first sync to overwrite local state (prevent duplication)
+            if (!isHostRef.current && !hasSyncedRef.current) {
+                try {
+                    const fragment = ydoc.getXmlFragment("default");
+                    fragment.delete(0, fragment.length);
+                    hasSyncedRef.current = true;
+                } catch (e) {
+                    console.error("Failed to clear YDoc:", e);
+                }
+            }
+
             // FIX: Tag the update as 'p2p' so useCollaborativeEditor doesn't echo it
             Y.applyUpdate(ydoc, new Uint8Array(e.payload.data), 'p2p');
             if (onSyncReceived) onSyncReceived();
@@ -64,6 +81,7 @@ export function useP2P(
       listen<{ path: string, data: number[] }>("p2p-file-content", (e) => {
         if (currentRelativePath && e.payload.path === currentRelativePath) {
            onFileContentReceived(e.payload.data);
+           hasSyncedRef.current = true;
         }
       }),
       
@@ -102,14 +120,13 @@ export function useP2P(
     };
   }, [ydoc, onProjectReceived, currentRelativePath, getFileContent, onFileContentReceived, onSyncReceived]);
 
-  // ... (rest of the hook functions: sendJoinRequest, acceptRequest, etc.)
   const sendJoinRequest = async (peerId: string) => {
     try {
-      setIsJoining(true); // [!code ++]
+      setIsJoining(true);
       setStatus(`Requesting to join ${peerId.slice(0, 8)}...`);
       await invoke("request_join", { peerId });
     } catch (e) {
-      setIsJoining(false); // [!code ++]
+      setIsJoining(false);
       setStatus(`Error joining: ${e}`);
     }
   };
@@ -147,7 +164,7 @@ export function useP2P(
     myPeerId,
     incomingRequest,
     isHost,
-    isJoining, // [!code ++]
+    isJoining,
     status,
     setStatus,
     sendJoinRequest,
