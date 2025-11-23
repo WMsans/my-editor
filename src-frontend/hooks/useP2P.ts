@@ -7,10 +7,10 @@ export function useP2P(
   ydoc: Y.Doc, 
   currentRelativePath: string | null, 
   onProjectReceived: (data: number[]) => void,
-  // Callback to get file content from disk (for Host)
   getFileContent: (path: string) => Promise<string>,
-  // Callback to handle receiving file content (for Guest)
-  onFileContentReceived: (data: number[]) => void
+  onFileContentReceived: (data: number[]) => void,
+  // NEW: Callback when Yjs sync data is received
+  onSyncReceived?: () => void
 ) {
   const [peers, setPeers] = useState<string[]>([]);
   const [incomingRequest, setIncomingRequest] = useState<string | null>(null);
@@ -38,13 +38,15 @@ export function useP2P(
         setStatus(`⚠ Host ${e.payload.slice(0, 8)} disconnected!`);
         setIsHost(true);
       }),
-      // Listen for sync events (YJS updates)
+      // Listen for sync events
       listen<{ path: string, data: number[] }>("p2p-sync", (e) => {
         if (currentRelativePath && e.payload.path === currentRelativePath) {
             Y.applyUpdate(ydoc, new Uint8Array(e.payload.data));
+            // Notify that sync occurred
+            if (onSyncReceived) onSyncReceived();
         }
       }),
-      // NEW: Listen for raw file content (Host sent file from disk)
+      // Listen for raw file content (Host sent file from disk)
       listen<{ path: string, data: number[] }>("p2p-file-content", (e) => {
         if (currentRelativePath && e.payload.path === currentRelativePath) {
            onFileContentReceived(e.payload.data);
@@ -81,7 +83,7 @@ export function useP2P(
     return () => {
       listeners.forEach((l) => l.then((unlisten) => unlisten()));
     };
-  }, [ydoc, onProjectReceived, currentRelativePath, getFileContent, onFileContentReceived]);
+  }, [ydoc, onProjectReceived, currentRelativePath, getFileContent, onFileContentReceived, onSyncReceived]);
 
   const sendJoinRequest = async (peerId: string) => {
     try {

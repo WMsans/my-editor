@@ -43,6 +43,7 @@ function App() {
   
   // Sync State
   const [isSyncing, setIsSyncing] = useState(false);
+  const syncReceivedRef = useRef(false); // Track if sync actually happened
 
   // Calculate relative path for the current session ID
   const relativeFilePath = getRelativePath(rootPath, currentFilePath);
@@ -62,6 +63,11 @@ function App() {
     sshKeyPathRef.current = sshKeyPath;
     localStorage.setItem("sshKeyPath", sshKeyPath);
   }, [sshKeyPath]);
+
+  // Reset sync ref when file changes
+  useEffect(() => {
+    syncReceivedRef.current = false;
+  }, [currentFilePath]);
 
   // Callback: Host reads a file from disk to serve to a guest
   const getFileContent = useCallback(async (relativePath: string) => {
@@ -87,12 +93,18 @@ function App() {
           } catch (e) {
             editor.commands.setContent(content, { contentType: 'markdown' });
           }
-          // Turn off syncing flag since we received content
           setIsSyncing(false);
+          syncReceivedRef.current = true; 
       } catch (e) {
           console.error("Failed to set content", e);
       }
   }, [editor]);
+
+  // Callback: Yjs Sync Received
+  const onSyncReceived = useCallback(() => {
+      setIsSyncing(false);
+      syncReceivedRef.current = true;
+  }, []);
 
   // Define onProjectReceived logic
   const handleProjectReceived = useCallback(async (data: number[]) => {
@@ -127,7 +139,8 @@ function App() {
       relativeFilePath, 
       handleProjectReceived,
       getFileContent, 
-      onFileContentReceived
+      onFileContentReceived,
+      onSyncReceived // Pass the new callback
   );
 
   // -- File Content Loading Logic --
@@ -150,25 +163,36 @@ function App() {
             .catch((e) => setWarningMsg("Error opening file: " + e));
       };
 
+      // Host Strategy:
+      // If peers exist, try to sync from them first to avoid duplication.
+      // If no peers or timeout, fall back to disk.
       if (isHost) {
-          // Host: Load immediately from disk.
-          loadFromDisk();
-      } else {
-          // Guest: Request sync 
           if (peers.length > 0 && relativeFilePath) {
               setIsSyncing(true);
               requestSync(relativeFilePath);
               
-              // Detection logic: Sync completes when we receive YJS update OR file content.
-              // YJS update triggers ydoc.on('update'), which we listen to here.
-              const handleUpdate = () => {
-                  setIsSyncing(false);
-              };
-              
-              ydoc.on('update', handleUpdate);
-              return () => {
-                  ydoc.off('update', handleUpdate);
-              };
+              // Short timeout to wait for a sync response
+              const timer = setTimeout(() => {
+                  if (!syncReceivedRef.current) {
+                      // No sync received? Fallback to disk.
+                      setIsSyncing(false);
+                      // Only load if the editor is still empty to be safe
+                      if (editor.getText().trim() === "") {
+                          loadFromDisk();
+                      }
+                  }
+              }, 250); // 250ms wait
+              return () => clearTimeout(timer);
+          } else {
+              loadFromDisk();
+          }
+      } else {
+          // Guest Strategy:
+          // Always try to sync. Fallback to disk if no peers or manual failure.
+          if (peers.length > 0 && relativeFilePath) {
+              setIsSyncing(true);
+              requestSync(relativeFilePath);
+              // Note: Guests stay in "Syncing..." until content arrives (handled by onSyncReceived/onFileContentReceived)
           } else {
               loadFromDisk();
           }
@@ -351,7 +375,7 @@ function App() {
               padding: '5px', background: '#89b4fa', color: '#1e1e2e', 
               textAlign: 'center', zIndex: 10, fontSize: '0.9rem'
             }}>
-              Syncing content from host...
+              Syncing content...
             </div>
           )}
 
