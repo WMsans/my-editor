@@ -9,14 +9,15 @@ export function useP2P(
   onProjectReceived: (data: number[]) => void,
   getFileContent: (path: string) => Promise<string>,
   onFileContentReceived: (data: number[]) => void,
-  onSyncReceived?: () => void
+  onSyncReceived?: () => void,
+  onHostDisconnect?: (hostId: string) => void //
 ) {
   const [myPeerId, setMyPeerId] = useState<string | null>(null);
   const [incomingRequest, setIncomingRequest] = useState<string | null>(null);
   const [isHost, setIsHost] = useState(true);
   const [status, setStatus] = useState("Initializing...");
   const [isJoining, setIsJoining] = useState(false);
-  const [myAddresses, setMyAddresses] = useState<string[]>([]); 
+  const [myAddresses, setMyAddresses] = useState<string[]>([]);
 
   const isHostRef = useRef(isHost);
   useEffect(() => {
@@ -58,7 +59,8 @@ export function useP2P(
       }),
       listen<string>("host-disconnected", (e) => {
         setStatus(`⚠ Host disconnected! Negotiating...`);
-        setIsHost(true); 
+        setIsHost(true);
+        if (onHostDisconnect) onHostDisconnect(e.payload); //
       }),
       
       listen<{ path: string, data: number[] }>("p2p-sync", (e) => {
@@ -113,7 +115,7 @@ export function useP2P(
     return () => {
       listeners.forEach((l) => l.then((unlisten) => unlisten()));
     };
-  }, [ydoc, onProjectReceived, currentRelativePath, getFileContent, onFileContentReceived, onSyncReceived]);
+  }, [ydoc, onProjectReceived, currentRelativePath, getFileContent, onFileContentReceived, onSyncReceived, onHostDisconnect]);
 
   const sendJoinRequest = async (peerId: string, remoteAddrs: string[] = []) => {
     try {

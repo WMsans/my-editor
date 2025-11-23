@@ -38,6 +38,7 @@ function App() {
   const [isPushing, setIsPushing] = useState(false); 
   const [isSyncing, setIsSyncing] = useState(false);
   const syncReceivedRef = useRef(false); 
+  const deadHostIdRef = useRef<string | null>(null);
   
   const suppressBroadcastRef = useRef(false);
 
@@ -152,6 +153,10 @@ function App() {
     }
   }, []);
 
+  const handleHostDisconnect = useCallback((hostId: string) => {
+      deadHostIdRef.current = hostId;
+  }, []);
+
   const { 
     myPeerId,
     incomingRequest, 
@@ -170,7 +175,8 @@ function App() {
       handleProjectReceived,
       getFileContent, 
       onFileContentReceived,
-      onSyncReceived 
+      onSyncReceived,
+      handleHostDisconnect // Pass the callback
   );
 
   const handleForceHost = async () => {
@@ -233,13 +239,18 @@ function App() {
         }
 
         if (metaHost && metaHost !== myPeerId) {
-            if (!isHostRef.current) return;
+            // FIX: If the meta points to the dead host, ignore it and claim host.
+            if (deadHostIdRef.current && metaHost === deadHostIdRef.current) {
+                console.log("Ignoring disconnected host ID in meta file.");
+            } else {
+                if (!isHostRef.current) return;
 
-            setStatus(`Found host ${metaHost.slice(0,8)}. Joining...`);
-            isAutoJoining.current = true; 
-            const targetAddrs = metaAddrs || [];
-            sendJoinRequest(metaHost, targetAddrs);
-            return; 
+                setStatus(`Found host ${metaHost.slice(0,8)}. Joining...`);
+                isAutoJoining.current = true; 
+                const targetAddrs = metaAddrs || [];
+                sendJoinRequest(metaHost, targetAddrs);
+                return; 
+            }
         }
 
         if (metaHost === myPeerId) {
@@ -262,6 +273,8 @@ function App() {
         try {
             await invoke("push_changes", { path: rootPath, sshKeyPath: ssh });
             setStatus("Host claimed and synced.");
+            // Clear dead host ref since we successfully claimed it
+            deadHostIdRef.current = null;
         } catch (e) {
             console.error("Push failed:", e);
             if (retryCount < 2) {
