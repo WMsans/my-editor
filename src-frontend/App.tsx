@@ -143,6 +143,12 @@ function App() {
       onSyncReceived 
   );
 
+  // [!code ++] Track isHost in ref to access it in cleanup (onCloseRequested)
+  const isHostRef = useRef(isHost);
+  useEffect(() => {
+    isHostRef.current = isHost;
+  }, [isHost]);
+
   useEffect(() => {
     if (editor) {
       editor.setEditable(!isJoining);
@@ -203,7 +209,7 @@ function App() {
             content: JSON.stringify({ hostId: myPeerId }, null, 2) 
         });
 
-        // 5. Commit and Push
+        // 5. Commit and Push [!code ++] Immediate push verified
         try {
             await invoke("push_changes", { path: rootPath, sshKeyPath: ssh });
             setStatus("Host claimed and synced.");
@@ -315,6 +321,20 @@ function App() {
         event.preventDefault(); 
         setIsPushing(true);
         try {
+          // [!code ++] FIX: If we are host, clear the hostId in meta file before pushing
+          if (isHostRef.current) {
+             const sep = currentRoot.includes("\\") ? "\\" : "/";
+             const metaPath = `${currentRoot}${sep}${META_FILE}`;
+             try {
+                await invoke("write_file_content", { 
+                    path: metaPath, 
+                    content: JSON.stringify({ hostId: "" }, null, 2) 
+                });
+             } catch (e) {
+                console.error("Failed to clear host ID:", e);
+             }
+          }
+
           await invoke("push_changes", { path: currentRoot, sshKeyPath: currentSsh || "" });
           await win.destroy();
         } catch (e: any) {
