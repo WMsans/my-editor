@@ -87,7 +87,10 @@ export function useP2P(
       listen<{ path: string, data: number[] }>("p2p-file-content", (e) => {
         if (currentRelativePath && e.payload.path === currentRelativePath) {
            onFileContentReceived(e.payload.data);
-           hasSyncedRef.current = true;
+           // FIX: Do NOT mark hasSyncedRef as true here.
+           // Receiving raw file content is a temporary state. We want the 
+           // subsequent p2p-sync (from the Host opening the file) to trigger
+           // the document clear logic above to prevent duplication.
         }
       }),
       
