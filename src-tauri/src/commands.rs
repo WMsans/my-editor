@@ -210,6 +210,15 @@ pub fn set_remote_origin(path: String, url: String) -> Result<String, String> {
 
 #[command]
 pub fn push_changes(path: String, ssh_key_path: String) -> Result<String, String> {
+    // 1. Commit Staged Changes (Fixes "Still not pushing" issue)
+    // Files are staged on save (in write_file_content), but we must commit them before pushing.
+    let mut commit_cmd = std::process::Command::new("git");
+    commit_cmd.current_dir(&path);
+    // Suppress output, allow empty message. If nothing to commit, this fails harmlessly.
+    commit_cmd.args(&["commit", "-m", "Auto-sync on quit"]);
+    let _ = commit_cmd.output();
+
+    // 2. Push Changes
     let mut cmd = std::process::Command::new("git");
     cmd.current_dir(&path);
     cmd.arg("push");
@@ -221,6 +230,9 @@ pub fn push_changes(path: String, ssh_key_path: String) -> Result<String, String
         let ssh_cmd = format!("ssh -i \"{}\"", ssh_key_path);
         cmd.env("GIT_SSH_COMMAND", ssh_cmd);
     }
+
+    // FIX: Fail immediately if git asks for a password (prevents hang)
+    cmd.env("GIT_TERMINAL_PROMPT", "0");
 
     let output = cmd.output().map_err(|e| format!("Git command failed: {}", e))?;
 

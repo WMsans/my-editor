@@ -37,13 +37,14 @@ function App() {
   const [sshKeyPath, setSshKeyPath] = useState(localStorage.getItem("sshKeyPath") || "");
   const [detectedRemote, setDetectedRemote] = useState("");
   
-  // Warning State
+  // Warning & Status State
   const [warningMsg, setWarningMsg] = useState<string | null>(null);
   const [pendingQuit, setPendingQuit] = useState(false);
+  const [isPushing, setIsPushing] = useState(false); // New UI state
   
   // Sync State
   const [isSyncing, setIsSyncing] = useState(false);
-  const syncReceivedRef = useRef(false); // Track if sync actually happened
+  const syncReceivedRef = useRef(false); 
 
   // Calculate relative path for the current session ID
   const relativeFilePath = getRelativePath(rootPath, currentFilePath);
@@ -72,7 +73,6 @@ function App() {
   // Callback: Host reads a file from disk to serve to a guest
   const getFileContent = useCallback(async (relativePath: string) => {
      if (!rootPath) throw new Error("No root path open");
-     // Simple heuristic to guess separator. 
      const sep = rootPath.includes("\\") ? "\\" : "/";
      const absPath = `${rootPath}${sep}${relativePath}`;
      return await invoke<string>("read_file_content", { path: absPath });
@@ -124,7 +124,6 @@ function App() {
     }
   }, []);
 
-  // Pass RELATIVE path and callbacks to P2P hook
   const { 
     peers, 
     incomingRequest, 
@@ -140,7 +139,7 @@ function App() {
       handleProjectReceived,
       getFileContent, 
       onFileContentReceived,
-      onSyncReceived // Pass the new callback
+      onSyncReceived 
   );
 
   // -- File Content Loading Logic --
@@ -163,36 +162,26 @@ function App() {
             .catch((e) => setWarningMsg("Error opening file: " + e));
       };
 
-      // Host Strategy:
-      // If peers exist, try to sync from them first to avoid duplication.
-      // If no peers or timeout, fall back to disk.
       if (isHost) {
           if (peers.length > 0 && relativeFilePath) {
               setIsSyncing(true);
               requestSync(relativeFilePath);
-              
-              // Short timeout to wait for a sync response
               const timer = setTimeout(() => {
                   if (!syncReceivedRef.current) {
-                      // No sync received? Fallback to disk.
                       setIsSyncing(false);
-                      // Only load if the editor is still empty to be safe
                       if (editor.getText().trim() === "") {
                           loadFromDisk();
                       }
                   }
-              }, 250); // 250ms wait
+              }, 250); 
               return () => clearTimeout(timer);
           } else {
               loadFromDisk();
           }
       } else {
-          // Guest Strategy:
-          // Always try to sync. Fallback to disk if no peers or manual failure.
           if (peers.length > 0 && relativeFilePath) {
               setIsSyncing(true);
               requestSync(relativeFilePath);
-              // Note: Guests stay in "Syncing..." until content arrives (handled by onSyncReceived/onFileContentReceived)
           } else {
               loadFromDisk();
           }
@@ -218,13 +207,17 @@ function App() {
 
       if (currentRoot && !pendingQuit) {
         event.preventDefault(); 
+        
+        // UI Feedback: Show user we are working
+        setIsPushing(true);
         console.log("Window close requested. Attempting push...");
+
         try {
-          // REMOVED BLOCKING CHECK: if (!currentSsh) throw new Error(...)
-          // Now allows pushing with empty SSH key (using agent/config)
+          // NOTE: sshKeyPath is passed even if empty (safe for agent usage)
           await invoke("push_changes", { path: currentRoot, sshKeyPath: currentSsh || "" });
           await win.destroy();
         } catch (e: any) {
+          setIsPushing(false);
           setWarningMsg(`Failed to push changes before quitting:\n\n${e}\n\nQuit anyway?`);
           setPendingQuit(true);
         }
@@ -348,6 +341,21 @@ function App() {
       />
 
       <div className="main-workspace">
+        {/* Sync/Push Overlay */}
+        {(isSyncing || isPushing) && (
+          <div style={{
+            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(30, 30, 46, 0.8)', color: '#cdd6f4', 
+            zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexDirection: 'column'
+          }}>
+            <div style={{ fontSize: '1.2rem', marginBottom: '10px' }}>
+              {isPushing ? "Pushing changes to remote..." : "Syncing content..."}
+            </div>
+            {isPushing && <small>Please wait, do not close.</small>}
+          </div>
+        )}
+
         <aside className="sidebar">
            <FileExplorer 
              rootPath={rootPath} 
@@ -370,16 +378,6 @@ function App() {
         </aside>
 
         <main className="editor-container">
-          {isSyncing && (
-            <div style={{
-              position: 'absolute', top: 0, left: 0, right: 0, 
-              padding: '5px', background: '#89b4fa', color: '#1e1e2e', 
-              textAlign: 'center', zIndex: 10, fontSize: '0.9rem'
-            }}>
-              Syncing content...
-            </div>
-          )}
-
           <div className="editor-scroll-area">
              {editor && <SlashMenu editor={editor} />}
 

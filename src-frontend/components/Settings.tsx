@@ -38,7 +38,7 @@ export const Settings: React.FC<SettingsProps> = ({
         {detectedRemote && (
           <div className="setting-group">
              <label>Detected Remote Origin</label>
-             <input disabled value={detectedRemote} />
+             <input disabled value={detectedRemote} style={{ opacity: 0.7 }} />
           </div>
         )}
 
