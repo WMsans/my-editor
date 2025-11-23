@@ -1,0 +1,51 @@
+import React from "react";
+
+interface SettingsProps {
+  isOpen: boolean;
+  onClose: () => void;
+  sshKeyPath: string;
+  setSshKeyPath: (path: string) => void;
+  detectedRemote: string;
+}
+
+export const Settings: React.FC<SettingsProps> = ({
+  isOpen,
+  onClose,
+  sshKeyPath,
+  setSshKeyPath,
+  detectedRemote
+}) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="settings-overlay" onClick={onClose}>
+      <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
+        <h3>Settings</h3>
+        
+        <div className="setting-group">
+          <label>SSH Private Key Path (Optional)</label>
+          <input 
+            type="text" 
+            value={sshKeyPath} 
+            onChange={(e) => setSshKeyPath(e.target.value)} 
+            placeholder="/Users/username/.ssh/id_rsa"
+          />
+          <small>
+            Leave empty to use <code>~/.ssh/config</code> or SSH Agent.
+          </small>
+        </div>
+
+        {detectedRemote && (
+          <div className="setting-group">
+             <label>Detected Remote Origin</label>
+             <input disabled value={detectedRemote} style={{ opacity: 0.7 }} />
+          </div>
+        )}
+
+        <div className="actions">
+          <button onClick={onClose} className="btn-close">Close</button>
+        </div>
+      </div>
+    </div>
+  );
+};

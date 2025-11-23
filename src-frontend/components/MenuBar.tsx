@@ -5,17 +5,26 @@ interface MenuBarProps {
   onOpenFolder: () => void;
   onSave: () => void;
   onSaveAs: () => void;
+  onSettings: () => void;
+  onQuit: () => void;
   currentFile: string | null;
 }
 
-export const MenuBar: React.FC<MenuBarProps> = ({ onNew, onOpenFolder, onSave, onSaveAs, currentFile }) => {
+export const MenuBar: React.FC<MenuBarProps> = ({ 
+  onNew, 
+  onOpenFolder, 
+  onSave, 
+  onSaveAs, 
+  onSettings,
+  onQuit,
+  currentFile 
+}) => {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
 
   const toggleMenu = (menu: string) => {
     setActiveMenu(activeMenu === menu ? null : menu);
   };
 
-  // Close dropdown when clicking elsewhere (simple implementation)
   React.useEffect(() => {
     const close = () => setActiveMenu(null);
     window.addEventListener("click", close);
@@ -34,6 +43,10 @@ export const MenuBar: React.FC<MenuBarProps> = ({ onNew, onOpenFolder, onSave, o
             <div className="separator" />
             <div onClick={() => { onSave(); setActiveMenu(null); }}>Save</div>
             <div onClick={() => { onSaveAs(); setActiveMenu(null); }}>Save As...</div>
+            <div className="separator" />
+            <div onClick={() => { onSettings(); setActiveMenu(null); }}>Settings</div>
+            <div className="separator" />
+            <div onClick={() => { onQuit(); setActiveMenu(null); }}>Quit</div>
           </div>
         )}
       </div>

@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Emitter}; // Manager is not strictly needed here if we use AppHandle for emitting
+use tauri::{AppHandle, Emitter};
 use std::time::Duration;
 use libp2p::{
     mdns, noise, tcp, yamux,
@@ -7,7 +7,8 @@ use libp2p::{
     request_response::{self, ProtocolSupport},
 };
 use tokio::sync::mpsc::Receiver;
-use futures::stream::StreamExt; // Required for select_next_some
+use futures::stream::StreamExt; 
+use serde::Serialize; 
 
 use crate::protocol::{AppRequest, AppResponse, Payload};
 use crate::state::PeerState;
@@ -18,9 +19,27 @@ struct MyBehaviour {
     request_response: request_response::json::Behaviour<AppRequest, AppResponse>,
 }
 
+#[derive(Serialize, Clone)]
+struct SyncEvent {
+    path: String,
+    data: Vec<u8>,
+}
+
+#[derive(Serialize, Clone)]
+struct SyncRequestEvent {
+    path: String,
+}
+
+// NEW: Event for raw file content
+#[derive(Serialize, Clone)]
+struct FileContentEvent {
+    path: String,
+    data: Vec<u8>,
+}
+
 pub async fn start_p2p_node(
     app_handle: AppHandle,
-    state: PeerState, // This contains the Arcs
+    state: PeerState, 
     mut cmd_rx: Receiver<(String, Payload)>
 ) -> Result<(), Box<dyn std::error::Error>> {
     
@@ -45,14 +64,12 @@ pub async fn start_p2p_node(
 
     loop {
         tokio::select! {
-            // 1. Heartbeat
             _ = heartbeat.tick() => {
                 if let Some(host_id) = current_host {
                     swarm.behaviour_mut().request_response.send_request(&host_id, AppRequest::Ping);
                 }
             }
 
-            // 2. Commands from Frontend (via Channel)
             Some((cmd, payload)) = cmd_rx.recv() => {
                 match (cmd.as_str(), payload) {
                     ("join", Payload::PeerId(peer_str)) => {
@@ -74,21 +91,56 @@ pub async fn start_p2p_node(
                              );
                         }
                     },
-                    ("sync", Payload::SyncData(data)) => {
+                    ("sync", Payload::SyncData { path, data }) => {
                         let targets: Vec<String> = state.active_peers.lock().unwrap().iter().cloned().collect();
                         
                         for peer_str in targets {
                             if let Ok(peer) = peer_str.parse::<PeerId>() {
                                 swarm.behaviour_mut().request_response.send_request(
                                     &peer,
-                                    AppRequest::Sync { data: data.clone() }
+                                    AppRequest::Sync { path: path.clone(), data: data.clone() }
                                 );
                             }
                         }
                         if let Some(host) = current_host {
                             swarm.behaviour_mut().request_response.send_request(
                                 &host,
-                                AppRequest::Sync { data: data.clone() }
+                                AppRequest::Sync { path: path.clone(), data: data.clone() }
+                            );
+                        }
+                    },
+                    ("request_sync", Payload::RequestSync { path }) => {
+                        let targets: Vec<String> = state.active_peers.lock().unwrap().iter().cloned().collect();
+                         for peer_str in targets {
+                            if let Ok(peer) = peer_str.parse::<PeerId>() {
+                                swarm.behaviour_mut().request_response.send_request(
+                                    &peer,
+                                    AppRequest::RequestSync { path: path.clone() }
+                                );
+                            }
+                        }
+                        if let Some(host) = current_host {
+                            swarm.behaviour_mut().request_response.send_request(
+                                &host,
+                                AppRequest::RequestSync { path: path.clone() }
+                            );
+                        }
+                    },
+                    // NEW: Send File Content
+                    ("file_content", Payload::FileContent { path, data }) => {
+                        let targets: Vec<String> = state.active_peers.lock().unwrap().iter().cloned().collect();
+                        for peer_str in targets {
+                            if let Ok(peer) = peer_str.parse::<PeerId>() {
+                                swarm.behaviour_mut().request_response.send_request(
+                                    &peer,
+                                    AppRequest::FileContent { path: path.clone(), data: data.clone() }
+                                );
+                            }
+                        }
+                         if let Some(host) = current_host {
+                            swarm.behaviour_mut().request_response.send_request(
+                                &host,
+                                AppRequest::FileContent { path: path.clone(), data: data.clone() }
                             );
                         }
                     },
@@ -96,13 +148,10 @@ pub async fn start_p2p_node(
                 }
             }
             
-            // 3. Network Events (mDNS, Requests, etc.)
             event = swarm.select_next_some() => {
                 match event {
-                    // --- mDNS Discovery ---
                     SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
                         for (peer_id, _) in list {
-                            // FIX: Use state.peers directly
                             state.peers.lock().unwrap().insert(peer_id.to_string());
                             let _ = app_handle.emit("peer-discovered", peer_id.to_string());
                         }
@@ -114,7 +163,6 @@ pub async fn start_p2p_node(
                         }
                     },
 
-                    // --- Request / Response ---
                     SwarmEvent::Behaviour(MyBehaviourEvent::RequestResponse(request_response::Event::Message { 
                         peer, message: request_response::Message::Request { request, channel, .. }, ..
                     })) => {
@@ -124,8 +172,17 @@ pub async fn start_p2p_node(
                                 state.pending_invites.lock().unwrap().insert(peer.to_string(), channel);
                                 let _ = app_handle.emit("join-requested", peer.to_string());
                             },
-                            AppRequest::Sync { data } => {
-                                let _ = app_handle.emit("p2p-sync", data);
+                            AppRequest::Sync { path, data } => {
+                                let _ = app_handle.emit("p2p-sync", SyncEvent { path, data });
+                                let _ = swarm.behaviour_mut().request_response.send_response(channel, AppResponse::Ack);
+                            },
+                            AppRequest::RequestSync { path } => {
+                                let _ = app_handle.emit("sync-requested", SyncRequestEvent { path });
+                                let _ = swarm.behaviour_mut().request_response.send_response(channel, AppResponse::Ack);
+                            },
+                            // NEW: Handle File Content
+                            AppRequest::FileContent { path, data } => {
+                                let _ = app_handle.emit("p2p-file-content", FileContentEvent { path, data });
                                 let _ = swarm.behaviour_mut().request_response.send_response(channel, AppResponse::Ack);
                             },
                             AppRequest::Ping => {

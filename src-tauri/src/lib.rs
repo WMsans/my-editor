@@ -36,10 +36,17 @@ pub fn run() {
             commands::request_join,
             commands::approve_join,
             commands::broadcast_update,
-            // Register new commands
             commands::read_directory,
             commands::read_file_content,
-            commands::write_file_content
+            commands::write_file_content,
+            commands::init_git_repo,
+            commands::set_remote_origin,
+            commands::push_changes,
+            commands::get_remote_origin,
+            commands::save_incoming_project,
+            commands::request_file_sync,
+            // NEW: Register new command
+            commands::broadcast_file_content
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

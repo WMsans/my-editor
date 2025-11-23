@@ -1,9 +1,18 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileSyncEntry {
+    pub path: String,
+    pub content: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AppRequest {
     Join { username: String },
-    Sync { data: Vec<u8> },
+    Sync { path: String, data: Vec<u8> },
+    // Added FileContent request
+    FileContent { path: String, data: Vec<u8> },
+    RequestSync { path: String },
     Ping,
 }
 
@@ -18,5 +27,8 @@ pub enum AppResponse {
 pub enum Payload {
     PeerId(String),
     JoinAccept { peer_id: String, content: Vec<u8> },
-    SyncData(Vec<u8>),
+    SyncData { path: String, data: Vec<u8> },
+    // Added FileContent payload
+    FileContent { path: String, data: Vec<u8> },
+    RequestSync { path: String },
 }
