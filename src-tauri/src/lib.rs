@@ -46,7 +46,8 @@ pub fn run() {
             // NEW: Register new command
             commands::broadcast_file_content,
             commands::get_local_peer_id,
-            commands::git_pull
+            commands::git_pull,
+            commands::get_local_addrs
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

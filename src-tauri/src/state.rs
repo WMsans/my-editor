@@ -7,8 +7,9 @@ use crate::protocol::AppResponse;
 pub struct PeerState {
     pub pending_invites: Arc<Mutex<HashMap<String, ResponseChannel<AppResponse>>>>,
     pub active_peers: Arc<Mutex<HashSet<String>>>,
-    // NEW: Field for local peer ID
     pub local_peer_id: Arc<Mutex<Option<String>>>,
+    // ADD THIS: Store local addresses
+    pub local_addrs: Arc<Mutex<Vec<String>>>,
 }
 
 impl PeerState {
@@ -17,6 +18,8 @@ impl PeerState {
             pending_invites: Arc::new(Mutex::new(HashMap::new())),
             active_peers: Arc::new(Mutex::new(HashSet::new())),
             local_peer_id: Arc::new(Mutex::new(None)),
+            // ADD THIS
+            local_addrs: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }

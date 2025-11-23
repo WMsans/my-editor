@@ -151,6 +151,28 @@ function App() {
       onSyncReceived 
   );
 
+  const handleForceHost = async () => {
+    if (!rootPath || !myPeerId) return;
+    setStatus("Forcing host claim...");
+    isAutoJoining.current = false;
+    
+    const sep = rootPath.includes("\\") ? "\\" : "/";
+    const metaPath = `${rootPath}${sep}${META_FILE}`;
+    
+    try {
+        await invoke("write_file_content", { 
+            path: metaPath, 
+            content: JSON.stringify({ hostId: myPeerId, hostAddrs: myAddresses }, null, 2) 
+        });
+        await invoke("push_changes", { path: rootPath, sshKeyPath: sshKeyPath });
+        setStatus("Host claimed (Forced).");
+        // Force a refresh of negotiation logic to confirm
+        window.location.reload(); 
+    } catch (e) {
+        setWarningMsg("Failed to force host: " + e);
+    }
+  };
+
   const isHostRef = useRef(isHost);
   useEffect(() => {
     isHostRef.current = isHost;
@@ -190,9 +212,12 @@ function App() {
         }
 
         if (metaHost && metaHost !== myPeerId) {
+            // FIX: If we are already a guest (isHost is false), we are already connected.
+            // Do not send another join request.
+            if (!isHostRef.current) return;
+
             setStatus(`Found host ${metaHost.slice(0,8)}. Joining...`);
             isAutoJoining.current = true; 
-            // CHANGED: Pass all addresses, so swarm can pick the reachable one
             const targetAddrs = metaAddrs || [];
             sendJoinRequest(metaHost, targetAddrs);
             return; 
@@ -456,6 +481,16 @@ function App() {
            <div className="p2p-panel">
               <h3>P2P Status: {isHost ? "Host" : "Guest"}</h3>
               <p className="status-text">{status}</p>
+              
+              {!isHost && status.includes("Joining") && (
+                 <button 
+                   onClick={handleForceHost} 
+                   style={{ marginTop: '10px', width: '100%', background: '#fab387', color: '#1e1e2e', border: 'none', padding: '5px', cursor: 'pointer' }}
+                 >
+                   Stop Joining & Become Host
+                 </button>
+              )}
+
               {incomingRequest && (
                 <IncomingRequest 
                   peerId={incomingRequest} 

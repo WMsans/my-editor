@@ -30,6 +30,14 @@ export function useP2P(
 
   useEffect(() => {
     invoke<string>("get_local_peer_id").then(setMyPeerId).catch(() => {});
+    
+    // ADD THIS: Fetch addresses that might have been emitted before we loaded
+    invoke<string[]>("get_local_addrs").then((addrs) => {
+        setMyAddresses(prev => {
+            const unique = new Set([...prev, ...addrs]);
+            return Array.from(unique);
+        });
+    }).catch(console.error);
 
     const listeners = [
       listen<string>("local-peer-id", (e) => setMyPeerId(e.payload)),

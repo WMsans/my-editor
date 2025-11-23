@@ -267,3 +267,8 @@ pub fn push_changes(path: String, ssh_key_path: String) -> Result<String, String
         Err(String::from_utf8_lossy(&output.stderr).to_string())
     }
 }
+
+#[command]
+pub fn get_local_addrs(state: State<'_, PeerState>) -> Result<Vec<String>, String> {
+    Ok(state.local_addrs.lock().unwrap().clone())
+}

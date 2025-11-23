@@ -1,10 +1,12 @@
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager}; 
 use std::time::Duration;
+use std::fs; 
 use libp2p::{
     noise, tcp, yamux,
-    swarm::{NetworkBehaviour, SwarmEvent, dial_opts::DialOpts}, // Added DialOpts
+    swarm::{NetworkBehaviour, SwarmEvent, dial_opts::DialOpts},
     SwarmBuilder, PeerId, StreamProtocol, Multiaddr, 
     request_response::{self, ProtocolSupport},
+    identity, 
 };
 use tokio::sync::mpsc::Receiver;
 use futures::stream::StreamExt; 
@@ -13,12 +15,19 @@ use serde::Serialize;
 use crate::protocol::{AppRequest, AppResponse, Payload};
 use crate::state::PeerState;
 
+// NEW: Helper to find local LAN IP
+fn get_local_ip() -> Option<std::net::IpAddr> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    // We don't actually send data, just determining the route to a public IP
+    socket.connect("8.8.8.8:80").ok()?;
+    socket.local_addr().ok().map(|addr| addr.ip())
+}
+
 #[derive(NetworkBehaviour)]
 struct MyBehaviour {
     request_response: request_response::json::Behaviour<AppRequest, AppResponse>,
 }
 
-// ... [Keep structs SyncEvent, SyncRequestEvent, FileContentEvent unchanged] ...
 #[derive(Serialize, Clone)]
 struct SyncEvent {
     path: String,
@@ -42,7 +51,20 @@ pub async fn start_p2p_node(
     mut cmd_rx: Receiver<(String, Payload)>
 ) -> Result<(), Box<dyn std::error::Error>> {
     
-    let mut swarm = SwarmBuilder::with_new_identity()
+    let app_data_dir = app_handle.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    fs::create_dir_all(&app_data_dir)?;
+    let identity_path = app_data_dir.join("peer_identity");
+
+    let keypair = if identity_path.exists() {
+        let bytes = fs::read(&identity_path)?;
+        identity::Keypair::from_protobuf_encoding(&bytes)?
+    } else {
+        let key = identity::Keypair::generate_ed25519();
+        fs::write(&identity_path, key.to_protobuf_encoding()?)?;
+        key
+    };
+
+    let mut swarm = SwarmBuilder::with_existing_identity(keypair)
         .with_tokio()
         .with_tcp(tcp::Config::default(), noise::Config::new, yamux::Config::default)?
         .with_behaviour(|_key| {
@@ -75,10 +97,8 @@ pub async fn start_p2p_node(
 
             Some((cmd, payload)) = cmd_rx.recv() => {
                 match (cmd.as_str(), payload) {
-                    // CHANGED: Handle JoinCall with list of addresses
                     ("join", Payload::JoinCall { peer_id: peer_str, remote_addrs }) => {
                         if let Ok(peer) = peer_str.parse::<PeerId>() {
-                             // Use DialOpts to associate addresses with the PeerId explicitly
                              let mut multiaddrs = Vec::new();
                              for addr_str in remote_addrs {
                                  if let Ok(addr) = addr_str.parse::<Multiaddr>() {
@@ -169,8 +189,25 @@ pub async fn start_p2p_node(
             event = swarm.select_next_some() => {
                 match event {
                     SwarmEvent::NewListenAddr { address, .. } => {
-                        println!("Listening on {:?}", address);
-                        let _ = app_handle.emit("new-listen-addr", address.to_string());
+                        let addr_str = address.to_string();
+                        println!("Listening on {}", addr_str);
+                        
+                        // ADD THIS: Save raw address
+                        state.local_addrs.lock().unwrap().push(addr_str.clone());
+                        
+                        let _ = app_handle.emit("new-listen-addr", addr_str.clone());
+                        
+                        if addr_str.contains("0.0.0.0") {
+                            if let Some(lan_ip) = get_local_ip() {
+                                let fixed_addr = addr_str.replace("0.0.0.0", &lan_ip.to_string());
+                                println!("Announcing LAN Addr: {}", fixed_addr);
+                                
+                                // ADD THIS: Save LAN address
+                                state.local_addrs.lock().unwrap().push(fixed_addr.clone());
+                                
+                                let _ = app_handle.emit("new-listen-addr", fixed_addr);
+                            }
+                        }
                     },
                     SwarmEvent::Behaviour(MyBehaviourEvent::RequestResponse(request_response::Event::Message { 
                         peer, message: request_response::Message::Request { request, channel, .. }, ..
