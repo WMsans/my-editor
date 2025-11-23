@@ -19,20 +19,13 @@ export function useP2P(
   const [status, setStatus] = useState("Initializing...");
   const [isJoining, setIsJoining] = useState(false);
   
-  // [!code ++] Refs to access latest state inside stable listeners
-  const ydocRef = useRef(ydoc);
-  const pathRef = useRef(currentRelativePath);
+  // Ref to track host status inside listeners
   const isHostRef = useRef(isHost);
-  const callbacksRef = useRef({ onProjectReceived, getFileContent, onFileContentReceived, onSyncReceived });
-
   useEffect(() => {
-    ydocRef.current = ydoc;
-    pathRef.current = currentRelativePath;
     isHostRef.current = isHost;
-    callbacksRef.current = { onProjectReceived, getFileContent, onFileContentReceived, onSyncReceived };
-  }, [ydoc, currentRelativePath, isHost, onProjectReceived, getFileContent, onFileContentReceived, onSyncReceived]);
+  }, [isHost]);
 
-  // Track sync state
+  // NEW: Track if we have synced the current file to avoid merging local "noise" with remote "truth"
   const hasSyncedRef = useRef(false);
   useEffect(() => {
     hasSyncedRef.current = false;
@@ -44,8 +37,7 @@ export function useP2P(
     });
     invoke<string>("get_local_peer_id").then(setMyPeerId).catch(() => {});
 
-    // [!code ++] Persistent listeners (no dependency on ydoc/path)
-    const listenersPromise = Promise.all([
+    const listeners = [
       listen<string>("local-peer-id", (e) => setMyPeerId(e.payload)),
       listen<string>("peer-discovered", (e) => setPeers((prev) => [...new Set([...prev, e.payload])])),
       listen<string>("peer-expired", (e) => setPeers((prev) => prev.filter((p) => p !== e.payload))),
@@ -54,28 +46,26 @@ export function useP2P(
         setStatus(`Incoming request from ${e.payload.slice(0, 8)}...`);
       }),
       listen<number[]>("join-accepted", (e) => {
-        callbacksRef.current.onProjectReceived(e.payload);
+        onProjectReceived(e.payload);
         setIsHost(false);
         setIsJoining(false);
         setStatus("Joined session! Folder synced.");
       }),
       listen<string>("host-disconnected", (e) => {
         setStatus(`⚠ Host disconnected! Negotiating...`);
+        // FIX: Immediately remove the disconnected host from peers so negotiation knows they are offline
         setPeers((prev) => prev.filter((p) => p !== e.payload));
-        setIsHost(true); 
+        setIsHost(true); // Failover to host mode
       }),
       
-      // --- SYNC LISTENERS (using Refs) ---
+      // --- SYNC LISTENERS ---
       
       listen<{ path: string, data: number[] }>("p2p-sync", (e) => {
-        const currentPath = pathRef.current;
-        const doc = ydocRef.current;
-        
-        if (currentPath && e.payload.path === currentPath) {
-            // New Logic: Use the first sync to overwrite local state
+        if (currentRelativePath && e.payload.path === currentRelativePath) {
+            // New Logic: Use the first sync to overwrite local state (prevent duplication)
             if (!isHostRef.current && !hasSyncedRef.current) {
                 try {
-                    const fragment = doc.getXmlFragment("default");
+                    const fragment = ydoc.getXmlFragment("default");
                     fragment.delete(0, fragment.length);
                     hasSyncedRef.current = true;
                 } catch (e) {
@@ -83,35 +73,35 @@ export function useP2P(
                 }
             }
 
-            Y.applyUpdate(doc, new Uint8Array(e.payload.data), 'p2p');
-            if (callbacksRef.current.onSyncReceived) callbacksRef.current.onSyncReceived();
+            // FIX: Tag the update as 'p2p' so useCollaborativeEditor doesn't echo it
+            Y.applyUpdate(ydoc, new Uint8Array(e.payload.data), 'p2p');
+            if (onSyncReceived) onSyncReceived();
         }
       }),
       listen<{ path: string, data: number[] }>("p2p-file-content", (e) => {
-        const currentPath = pathRef.current;
-        if (currentPath && e.payload.path === currentPath) {
-           callbacksRef.current.onFileContentReceived(e.payload.data);
+        if (currentRelativePath && e.payload.path === currentRelativePath) {
+           onFileContentReceived(e.payload.data);
            hasSyncedRef.current = true;
         }
       }),
       
+      // Handle requests for sync (Host asking Guest, or Guest asking Host)
       listen<{ path: string }>("sync-requested", async (e) => {
         const requestedPath = e.payload.path;
-        const currentPath = pathRef.current;
-        const doc = ydocRef.current;
         
-        // 1. If we have the file open, share the LIVE state.
-        if (currentPath && requestedPath === currentPath) {
-            const state = Y.encodeStateAsUpdate(doc);
+        // 1. If we have the file open (Host or Guest), share the LIVE state.
+        if (currentRelativePath && requestedPath === currentRelativePath) {
+            const state = Y.encodeStateAsUpdate(ydoc);
             invoke("broadcast_update", { 
-                path: currentPath, 
+                path: currentRelativePath, 
                 data: Array.from(state) 
             }).catch(console.error);
         } else {
-            // 2. If not open, Host reads from disk.
+            // 2. If we don't have it open, only the HOST should read from disk.
+            // This prevents Guests from overwriting the Host with stale local files.
             if (isHostRef.current) {
                 try {
-                    const content = await callbacksRef.current.getFileContent(requestedPath);
+                    const content = await getFileContent(requestedPath);
                     const data = Array.from(new TextEncoder().encode(content));
                     invoke("broadcast_file_content", {
                         path: requestedPath,
@@ -123,12 +113,12 @@ export function useP2P(
             }
         }
       })
-    ]);
+    ];
 
     return () => {
-      listenersPromise.then(unlistenFns => unlistenFns.forEach(u => u()));
+      listeners.forEach((l) => l.then((unlisten) => unlisten()));
     };
-  }, []); // Empty dependency array = No race condition on file switch
+  }, [ydoc, onProjectReceived, currentRelativePath, getFileContent, onFileContentReceived, onSyncReceived]);
 
   const sendJoinRequest = async (peerId: string) => {
     try {
