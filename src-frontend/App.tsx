@@ -41,8 +41,11 @@ function App() {
 
   const relativeFilePath = getRelativePath(rootPath, currentFilePath);
   const { editor, ydoc } = useCollaborativeEditor(currentFilePath, relativeFilePath);
+  
+  // REFS
   const rootPathRef = useRef(rootPath);
   const sshKeyPathRef = useRef(sshKeyPath);
+  const isAutoJoining = useRef(false); // NEW: Track if we are auto-joining from meta file
 
   useEffect(() => {
     rootPathRef.current = rootPath;
@@ -91,14 +94,25 @@ function App() {
   }, []);
 
   const handleProjectReceived = useCallback(async (data: number[]) => {
-    const destPath = prompt("You joined a session! Enter absolute path to clone the project folder:");
+    let destPath: string | null = null;
+    let silent = false;
+
+    // FIX: If auto-joining (via meta file), use current root directly without prompt
+    if (isAutoJoining.current && rootPathRef.current) {
+        destPath = rootPathRef.current;
+        silent = true; 
+        isAutoJoining.current = false; // Reset flag
+    } else {
+        destPath = prompt("You joined a session! Enter absolute path to clone the project folder:");
+    }
+
     if (destPath) {
       try {
         await invoke("save_incoming_project", { destPath, data });
         setRootPath(destPath);
         setFileSystemRefresh(prev => prev + 1);
         setDetectedRemote("");
-        alert(`Project cloned to ${destPath}`);
+        if (!silent) alert(`Project cloned to ${destPath}`);
       } catch (e) {
         setWarningMsg("Failed to save incoming project: " + e);
       }
@@ -161,6 +175,7 @@ function App() {
             const isOnline = peers.includes(metaHost);
             if (isOnline) {
                 setStatus(`Found host ${metaHost.slice(0,8)}. Joining...`);
+                isAutoJoining.current = true; // NEW: Set flag to suppress clone prompt
                 sendJoinRequest(metaHost);
                 return; // Logic ends here: we are a guest
             } else {
