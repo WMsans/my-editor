@@ -10,7 +10,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { registry } from "../mod-engine/Registry";
 import "../mods/SimulationBlock"; 
 
-export function useCollaborativeEditor(currentFilePath: string | null, channelId: string | null) {
+export function useCollaborativeEditor(
+  currentFilePath: string | null, 
+  channelId: string | null,
+  suppressBroadcastRef?: React.MutableRefObject<boolean>
+) {
   
   // Create a fresh YDoc when the file path changes
   const ydoc = useMemo(() => new Y.Doc(), [currentFilePath]);
@@ -38,6 +42,8 @@ export function useCollaborativeEditor(currentFilePath: string | null, channelId
       // FIX: If the update came from 'p2p' (applied by useP2P), do NOT broadcast it back.
       if (origin === 'p2p') return;
 
+      if (suppressBroadcastRef?.current) return;
+
       invoke("broadcast_update", { 
         path: channelId, 
         data: Array.from(update) 
@@ -48,7 +54,7 @@ export function useCollaborativeEditor(currentFilePath: string | null, channelId
     return () => {
       ydoc.off("update", handleUpdate);
     };
-  }, [ydoc, channelId]);
+  }, [ydoc, channelId, suppressBroadcastRef]);
 
   return { editor, ydoc };
 }

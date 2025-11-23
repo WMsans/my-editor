@@ -11,6 +11,7 @@ import { WarningModal } from "./components/WarningModal";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SlashMenu } from "./components/SlashMenu"; 
+import * as Y from "yjs"; // Import Yjs
 import "./App.css";
 
 const META_FILE = ".collab_meta.json";
@@ -37,9 +38,11 @@ function App() {
   const [isPushing, setIsPushing] = useState(false); 
   const [isSyncing, setIsSyncing] = useState(false);
   const syncReceivedRef = useRef(false); 
+  
+  const suppressBroadcastRef = useRef(false);
 
   const relativeFilePath = getRelativePath(rootPath, currentFilePath);
-  const { editor, ydoc } = useCollaborativeEditor(currentFilePath, relativeFilePath);
+  const { editor, ydoc } = useCollaborativeEditor(currentFilePath, relativeFilePath, suppressBroadcastRef);
   
   const rootPathRef = useRef(rootPath);
   const sshKeyPathRef = useRef(sshKeyPath);
@@ -72,8 +75,25 @@ function App() {
 
   const onFileContentReceived = useCallback((data: number[]) => {
       if (!editor) return;
+
+      // FIX: If we have already synced/edited this file, ignore the incoming "init" content
+      // from the Host (which is likely just the disk version) and send them OUR latest state.
+      if (syncReceivedRef.current) {
+          console.log("Preserving local edits against Host disk load. Sending update to Host.");
+          if (ydoc && relativeFilePath) {
+             const state = Y.encodeStateAsUpdate(ydoc);
+             invoke("broadcast_update", { 
+                path: relativeFilePath, 
+                data: Array.from(state) 
+             }).catch(console.error);
+          }
+          return;
+      }
+
       try {
           const content = new TextDecoder().decode(new Uint8Array(data));
+          
+          suppressBroadcastRef.current = true;
           try {
             const jsonContent = JSON.parse(content);
             if (jsonContent.type === 'doc' && Array.isArray(jsonContent.content)) {
@@ -84,12 +104,14 @@ function App() {
           } catch (e) {
             editor.commands.setContent(content, { contentType: 'markdown' });
           }
+          suppressBroadcastRef.current = false;
+
           setIsSyncing(false);
           syncReceivedRef.current = true; 
       } catch (e) {
           console.error("Failed to set content", e);
       }
-  }, [editor]);
+  }, [editor, ydoc, relativeFilePath]);
 
   const onSyncReceived = useCallback(() => {
       setIsSyncing(false);
@@ -166,7 +188,6 @@ function App() {
         });
         await invoke("push_changes", { path: rootPath, sshKeyPath: sshKeyPath });
         setStatus("Host claimed (Forced).");
-        // Force a refresh of negotiation logic to confirm
         window.location.reload(); 
     } catch (e) {
         setWarningMsg("Failed to force host: " + e);
@@ -212,8 +233,6 @@ function App() {
         }
 
         if (metaHost && metaHost !== myPeerId) {
-            // FIX: If we are already a guest (isHost is false), we are already connected.
-            // Do not send another join request.
             if (!isHostRef.current) return;
 
             setStatus(`Found host ${metaHost.slice(0,8)}. Joining...`);
@@ -274,13 +293,14 @@ function App() {
   }, [isHost, rootPath]);
 
 
-  // --- EXISTING FUNCTIONALITY ---
-  // ... [Keep rest of the file unchanged] ...
   useEffect(() => {
     if (currentFilePath && editor) {
       const loadFromDisk = () => {
           invoke<string>("read_file_content", { path: currentFilePath })
             .then((content) => {
+              
+              if (isHost) suppressBroadcastRef.current = true;
+
               try {
                 const jsonContent = JSON.parse(content);
                 if (jsonContent.type === 'doc' && Array.isArray(jsonContent.content)) {
@@ -291,7 +311,16 @@ function App() {
               } catch (e) {
                 editor.commands.setContent(content, { contentType: 'markdown' });
               }
+              
+              if (isHost) suppressBroadcastRef.current = false;
+              
               setIsSyncing(false); 
+
+              if (isHost && relativeFilePath) {
+                 const bytes = Array.from(new TextEncoder().encode(content));
+                 invoke("broadcast_file_content", { path: relativeFilePath, data: bytes })
+                    .catch(e => console.error("Failed to broadcast init content", e));
+              }
             })
             .catch((e) => {
                 setWarningMsg("Error opening file: " + e);
