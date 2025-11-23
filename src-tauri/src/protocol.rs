@@ -24,8 +24,8 @@ pub enum AppResponse {
 
 #[derive(Debug, Clone)]
 pub enum Payload {
-    // CHANGED: Now includes optional remote_addr to dial before requesting
-    JoinCall { peer_id: String, remote_addr: Option<String> }, 
+    // CHANGED: Now includes a list of remote_addrs to try
+    JoinCall { peer_id: String, remote_addrs: Vec<String> }, 
     JoinAccept { peer_id: String, content: Vec<u8> },
     SyncData { path: String, data: Vec<u8> },
     FileContent { path: String, data: Vec<u8> },

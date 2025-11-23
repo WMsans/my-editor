@@ -2,8 +2,8 @@ use tauri::{AppHandle, Emitter};
 use std::time::Duration;
 use libp2p::{
     noise, tcp, yamux,
-    swarm::{NetworkBehaviour, SwarmEvent},
-    SwarmBuilder, PeerId, StreamProtocol, Multiaddr, // Added Multiaddr
+    swarm::{NetworkBehaviour, SwarmEvent, dial_opts::DialOpts}, // Added DialOpts
+    SwarmBuilder, PeerId, StreamProtocol, Multiaddr, 
     request_response::{self, ProtocolSupport},
 };
 use tokio::sync::mpsc::Receiver;
@@ -18,6 +18,7 @@ struct MyBehaviour {
     request_response: request_response::json::Behaviour<AppRequest, AppResponse>,
 }
 
+// ... [Keep structs SyncEvent, SyncRequestEvent, FileContentEvent unchanged] ...
 #[derive(Serialize, Clone)]
 struct SyncEvent {
     path: String,
@@ -74,15 +75,24 @@ pub async fn start_p2p_node(
 
             Some((cmd, payload)) = cmd_rx.recv() => {
                 match (cmd.as_str(), payload) {
-                    // CHANGED: Handle JoinCall with address
-                    ("join", Payload::JoinCall { peer_id: peer_str, remote_addr }) => {
+                    // CHANGED: Handle JoinCall with list of addresses
+                    ("join", Payload::JoinCall { peer_id: peer_str, remote_addrs }) => {
                         if let Ok(peer) = peer_str.parse::<PeerId>() {
-                             if let Some(addr_str) = remote_addr {
+                             // Use DialOpts to associate addresses with the PeerId explicitly
+                             let mut multiaddrs = Vec::new();
+                             for addr_str in remote_addrs {
                                  if let Ok(addr) = addr_str.parse::<Multiaddr>() {
-                                     // Try dialing to establish connection first
-                                     let _ = swarm.dial(addr);
+                                     multiaddrs.push(addr);
                                  }
                              }
+                             
+                             if !multiaddrs.is_empty() {
+                                 let opts = DialOpts::peer_id(peer)
+                                     .addresses(multiaddrs)
+                                     .build();
+                                 let _ = swarm.dial(opts);
+                             }
+
                             swarm.behaviour_mut().request_response.send_request(
                                 &peer, 
                                 AppRequest::Join { username: "Guest".into() }
@@ -158,7 +168,6 @@ pub async fn start_p2p_node(
             
             event = swarm.select_next_some() => {
                 match event {
-                     // NEW: Capture Listen Addresses
                     SwarmEvent::NewListenAddr { address, .. } => {
                         println!("Listening on {:?}", address);
                         let _ = app_handle.emit("new-listen-addr", address.to_string());

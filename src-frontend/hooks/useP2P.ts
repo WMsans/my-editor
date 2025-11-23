@@ -16,7 +16,7 @@ export function useP2P(
   const [isHost, setIsHost] = useState(true);
   const [status, setStatus] = useState("Initializing...");
   const [isJoining, setIsJoining] = useState(false);
-  const [myAddresses, setMyAddresses] = useState<string[]>([]); // NEW
+  const [myAddresses, setMyAddresses] = useState<string[]>([]); 
 
   const isHostRef = useRef(isHost);
   useEffect(() => {
@@ -33,7 +33,6 @@ export function useP2P(
 
     const listeners = [
       listen<string>("local-peer-id", (e) => setMyPeerId(e.payload)),
-      // NEW: Listen for addresses
       listen<string>("new-listen-addr", (e) => {
          setMyAddresses(prev => {
              if (prev.includes(e.payload)) return prev;
@@ -107,12 +106,13 @@ export function useP2P(
     };
   }, [ydoc, onProjectReceived, currentRelativePath, getFileContent, onFileContentReceived, onSyncReceived]);
 
-  const sendJoinRequest = async (peerId: string, remoteAddr?: string) => {
+  // CHANGED: Accept array of addresses
+  const sendJoinRequest = async (peerId: string, remoteAddrs: string[] = []) => {
     try {
       setIsJoining(true);
       setStatus(`Requesting to join ${peerId.slice(0, 8)}...`);
-      // NEW: Pass remoteAddr to backend
-      await invoke("request_join", { peerId, remoteAddr });
+      // Use new param name
+      await invoke("request_join", { peerId, remoteAddrs });
     } catch (e) {
       setIsJoining(false);
       setStatus(`Error joining: ${e}`);
@@ -158,6 +158,6 @@ export function useP2P(
     acceptRequest,
     rejectRequest,
     requestSync,
-    myAddresses // NEW: Export addresses
+    myAddresses 
   };
 }

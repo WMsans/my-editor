@@ -11,6 +11,7 @@ use std::process::Command;
 
 type SenderState<'a> = State<'a, Arc<Mutex<tokio::sync::mpsc::Sender<(String, Payload)>>>>;
 
+// ... [Keep FileEntry struct and visit_dirs function unchanged] ...
 #[derive(Serialize, Clone)]
 pub struct FileEntry {
     name: String,
@@ -78,11 +79,11 @@ pub fn git_pull(path: String, ssh_key_path: String) -> Result<String, String> {
 #[command]
 pub async fn request_join(
     peer_id: String, 
-    remote_addr: Option<String>, // NEW: Accept address
+    remote_addrs: Vec<String>, // CHANGED: Accept list of addresses
     sender: SenderState<'_> 
 ) -> Result<(), String> {
     let tx = sender.lock().await;
-    tx.send(("join".to_string(), Payload::JoinCall { peer_id, remote_addr })).await.map_err(|e| e.to_string())
+    tx.send(("join".to_string(), Payload::JoinCall { peer_id, remote_addrs })).await.map_err(|e| e.to_string())
 }
 
 #[command]
@@ -104,6 +105,7 @@ pub async fn approve_join(
     tx.send(("accept".to_string(), Payload::JoinAccept { peer_id, content })).await.map_err(|e| e.to_string())
 }
 
+// ... [Keep rest of the file unchanged] ...
 #[command]
 pub fn save_incoming_project(dest_path: String, data: Vec<u8>) -> Result<(), String> {
     let files: Vec<FileSyncEntry> = serde_json::from_slice(&data).map_err(|e| format!("Invalid project data: {}", e))?;

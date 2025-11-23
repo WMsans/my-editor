@@ -141,7 +141,7 @@ function App() {
     acceptRequest, 
     rejectRequest,
     requestSync,
-    myAddresses // NEW: Use myAddresses
+    myAddresses 
   } = useP2P(
       ydoc, 
       relativeFilePath, 
@@ -192,14 +192,13 @@ function App() {
         if (metaHost && metaHost !== myPeerId) {
             setStatus(`Found host ${metaHost.slice(0,8)}. Joining...`);
             isAutoJoining.current = true; 
-            // NEW: Pick first available address to join
-            const targetAddr = metaAddrs.length > 0 ? metaAddrs[0] : undefined;
-            sendJoinRequest(metaHost, targetAddr);
+            // CHANGED: Pass all addresses, so swarm can pick the reachable one
+            const targetAddrs = metaAddrs || [];
+            sendJoinRequest(metaHost, targetAddrs);
             return; 
         }
 
         if (metaHost === myPeerId) {
-             // NEW: Check if addresses match what we have, to update them if needed
              const currentSavedAddrs = metaAddrs || [];
              const sortedSaved = [...currentSavedAddrs].sort();
              const sortedCurrent = [...myAddresses].sort();
@@ -211,7 +210,6 @@ function App() {
              setStatus("Updating host addresses...");
         }
 
-        // Claim Host Role: Write ID and Addresses
         await invoke("write_file_content", { 
             path: metaPath, 
             content: JSON.stringify({ hostId: myPeerId, hostAddrs: myAddresses }, null, 2) 
@@ -236,7 +234,6 @@ function App() {
     }
   };
 
-  // NEW: Re-negotiate when myAddresses changes to ensure IP is shared
   useEffect(() => {
     if (rootPath && myPeerId) {
        negotiateHost();
@@ -253,7 +250,7 @@ function App() {
 
 
   // --- EXISTING FUNCTIONALITY ---
-
+  // ... [Keep rest of the file unchanged] ...
   useEffect(() => {
     if (currentFilePath && editor) {
       const loadFromDisk = () => {
