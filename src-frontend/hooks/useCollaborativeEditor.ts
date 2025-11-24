@@ -1,3 +1,4 @@
+// src-frontend/hooks/useCollaborativeEditor.ts
 import { useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Collaboration from "@tiptap/extension-collaboration";
@@ -11,8 +12,9 @@ import { registry } from "../mod-engine/Registry";
 import "../mods/SimulationBlock"; 
 
 export function useCollaborativeEditor(
-  doc: Y.Doc | null, 
-  channelId: string | null,
+  doc: Y.Doc, 
+  channelId: string,
+  initialContent: string | null,
   suppressBroadcastRef?: React.MutableRefObject<boolean>
 ) {
   
@@ -22,12 +24,18 @@ export function useCollaborativeEditor(
         // @ts-ignore
         history: false 
       }),
-      Collaboration.configure({ document: doc || new Y.Doc() }), 
+      Collaboration.configure({ document: doc }), 
       Markdown,
       BubbleMenuExtension,
       ...registry.getExtensions()
     ],
     editorProps: { attributes: { class: "editor-content" } },
+    onCreate: ({ editor }) => {
+      // If we have initial content and the collaborative document is empty, set it.
+      if (initialContent && editor.isEmpty) {
+         editor.commands.setContent(initialContent);
+      }
+    }
   }, [doc]);
 
   // Broadcast updates
@@ -35,9 +43,7 @@ export function useCollaborativeEditor(
     if (!channelId || !doc) return;
 
     const handleUpdate = (update: Uint8Array, origin: any) => {
-      // If the update came from 'p2p' (applied by useP2P), do NOT broadcast it back.
       if (origin === 'p2p') return;
-
       if (suppressBroadcastRef?.current) return;
 
       invoke("broadcast_update", { 
