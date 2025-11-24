@@ -2,15 +2,14 @@ import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import * as Y from "yjs";
+import { documentRegistry } from "../mod-engine/DocumentRegistry";
 
 export function useP2P(
-  ydoc: Y.Doc, 
-  currentRelativePath: string | null, 
+
   onProjectReceived: (data: number[]) => void,
-  getFileContent: (path: string) => Promise<string>,
-  onFileContentReceived: (data: number[]) => void,
-  onSyncReceived?: () => void,
-  onHostDisconnect?: (hostId: string) => void //
+
+  onHostDisconnect?: (hostId: string) => void
+
 ) {
   const [myPeerId, setMyPeerId] = useState<string | null>(null);
   const [incomingRequest, setIncomingRequest] = useState<string | null>(null);
@@ -23,11 +22,6 @@ export function useP2P(
   useEffect(() => {
     isHostRef.current = isHost;
   }, [isHost]);
-
-  const hasSyncedRef = useRef(false);
-  useEffect(() => {
-    hasSyncedRef.current = false;
-  }, [currentRelativePath]);
 
   useEffect(() => {
     invoke<string>("get_local_peer_id").then(setMyPeerId).catch(() => {});
@@ -60,62 +54,28 @@ export function useP2P(
       listen<string>("host-disconnected", (e) => {
         setStatus(`⚠ Host disconnected! Negotiating...`);
         setIsHost(true);
-        if (onHostDisconnect) onHostDisconnect(e.payload); //
+        if (onHostDisconnect) onHostDisconnect(e.payload);
       }),
       
       listen<{ path: string, data: number[] }>("p2p-sync", (e) => {
-        if (currentRelativePath && e.payload.path === currentRelativePath) {
-            // FIX: Allow Host to also clear their doc if they are receiving 
-            // the first sync packet (e.g., a full state push from a Guest).
-            if (!hasSyncedRef.current) {
-                try {
-                    const fragment = ydoc.getXmlFragment("default");
-                    fragment.delete(0, fragment.length);
-                } catch (e) {
-                    console.error("Failed to clear YDoc:", e);
-                }
-                hasSyncedRef.current = true;
-            }
-            Y.applyUpdate(ydoc, new Uint8Array(e.payload.data), 'p2p');
-            if (onSyncReceived) onSyncReceived();
-        }
-      }),
-      listen<{ path: string, data: number[] }>("p2p-file-content", (e) => {
-        if (currentRelativePath && e.payload.path === currentRelativePath) {
-           onFileContentReceived(e.payload.data);
-           hasSyncedRef.current = true;
-        }
+        documentRegistry.applyUpdate(e.payload.path, new Uint8Array(e.payload.data));
       }),
       
       listen<{ path: string }>("sync-requested", async (e) => {
         const requestedPath = e.payload.path;
-        if (currentRelativePath && requestedPath === currentRelativePath) {
-            const state = Y.encodeStateAsUpdate(ydoc);
-            invoke("broadcast_update", { 
-                path: currentRelativePath, 
-                data: Array.from(state) 
-            }).catch(console.error);
-        } else {
-            if (isHostRef.current) {
-                try {
-                    const content = await getFileContent(requestedPath);
-                    const data = Array.from(new TextEncoder().encode(content));
-                    invoke("broadcast_file_content", {
-                        path: requestedPath,
-                        data: data
-                    });
-                } catch (err) {
-                    console.error(`Could not sync requested file ${requestedPath}:`, err);
-                }
-            }
-        }
+        const doc = documentRegistry.getOrCreateDoc(requestedPath);
+        const state = Y.encodeStateAsUpdate(doc);
+        invoke("broadcast_update", { 
+            path: requestedPath, 
+            data: Array.from(state) 
+        }).catch(console.error);
       })
     ];
 
     return () => {
       listeners.forEach((l) => l.then((unlisten) => unlisten()));
     };
-  }, [ydoc, onProjectReceived, currentRelativePath, getFileContent, onFileContentReceived, onSyncReceived, onHostDisconnect]);
+  }, [onProjectReceived, onHostDisconnect]);
 
   const sendJoinRequest = async (peerId: string, remoteAddrs: string[] = []) => {
     try {

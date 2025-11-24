@@ -49,7 +49,7 @@ fn visit_dirs(dir: &Path, base: &Path, cb: &mut Vec<FileSyncEntry>) -> std::io::
 
 #[command]
 pub fn get_local_peer_id(state: State<'_, PeerState>) -> Result<String, String> {
-    state.local_peer_id.lock().unwrap().clone().ok_or("Peer ID not initialized".into())
+    state.local_peer_id.lock().unwrap_or_else(|e| e.into_inner()).clone().ok_or("Peer ID not initialized".into())
 }
 
 #[command]
@@ -185,8 +185,8 @@ pub fn read_directory(path: String) -> Result<Vec<FileEntry>, String> {
 }
 
 #[command]
-pub fn read_file_content(path: String) -> Result<String, String> {
-    fs::read_to_string(path).map_err(|e| e.to_string())
+pub fn read_file_content(path: String) -> Result<Vec<u8>, String> {
+    fs::read(path).map_err(|e| e.to_string())
 }
 
 #[command]
@@ -198,12 +198,12 @@ pub fn init_git_repo(path: String) -> Result<String, String> {
 }
 
 #[command]
-pub fn write_file_content(path: String, content: String) -> Result<(), String> {
+pub fn write_file_content(path: String, content: Vec<u8>) -> Result<(), String> {
     if let Some(parent) = Path::new(&path).parent() {
         fs::create_dir_all(parent).ok(); 
     }
     
-    fs::write(&path, content).map_err(|e| e.to_string())?;
+    fs::write(&path, &content).map_err(|e| e.to_string())?;
 
     if let Ok(repo) = Repository::discover(&path) {
         let path_obj = Path::new(&path);
@@ -270,5 +270,5 @@ pub fn push_changes(path: String, ssh_key_path: String) -> Result<String, String
 
 #[command]
 pub fn get_local_addrs(state: State<'_, PeerState>) -> Result<Vec<String>, String> {
-    Ok(state.local_addrs.lock().unwrap().clone())
+    Ok(state.local_addrs.lock().unwrap_or_else(|e| e.into_inner()).clone())
 }

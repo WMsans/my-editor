@@ -3,8 +3,6 @@ import React, { useState } from "react";
 interface MenuBarProps {
   onNew: () => void;
   onOpenFolder: () => void;
-  onSave: () => void;
-  onSaveAs: () => void;
   onSettings: () => void;
   onQuit: () => void;
   currentFile: string | null;
@@ -13,8 +11,6 @@ interface MenuBarProps {
 export const MenuBar: React.FC<MenuBarProps> = ({ 
   onNew, 
   onOpenFolder, 
-  onSave, 
-  onSaveAs, 
   onSettings,
   onQuit,
   currentFile 
@@ -40,9 +36,6 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             <div onClick={() => { onNew(); setActiveMenu(null); }}>New File</div>
             <div className="separator" />
             <div onClick={() => { onOpenFolder(); setActiveMenu(null); }}>Open Folder...</div>
-            <div className="separator" />
-            <div onClick={() => { onSave(); setActiveMenu(null); }}>Save</div>
-            <div onClick={() => { onSaveAs(); setActiveMenu(null); }}>Save As...</div>
             <div className="separator" />
             <div onClick={() => { onSettings(); setActiveMenu(null); }}>Settings</div>
             <div className="separator" />

@@ -11,7 +11,8 @@ import { WarningModal } from "./components/WarningModal";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SlashMenu } from "./components/SlashMenu"; 
-import * as Y from "yjs"; // Import Yjs
+import * as Y from "yjs";
+import { documentRegistry } from "./mod-engine/DocumentRegistry";
 import "./App.css";
 
 const META_FILE = ".collab_meta.json";
@@ -37,13 +38,11 @@ function App() {
   const [pendingQuit, setPendingQuit] = useState(false);
   const [isPushing, setIsPushing] = useState(false); 
   const [isSyncing, setIsSyncing] = useState(false);
-  const syncReceivedRef = useRef(false); 
   const deadHostIdRef = useRef<string | null>(null);
-  
-  const suppressBroadcastRef = useRef(false);
 
   const relativeFilePath = getRelativePath(rootPath, currentFilePath);
-  const { editor, ydoc } = useCollaborativeEditor(currentFilePath, relativeFilePath, suppressBroadcastRef);
+  const [currentDoc, setCurrentDoc] = useState<Y.Doc | null>(null);
+  const { editor } = useCollaborativeEditor(currentDoc);
   
   const rootPathRef = useRef(rootPath);
   const sshKeyPathRef = useRef(sshKeyPath);
@@ -62,62 +61,6 @@ function App() {
   useEffect(() => {
     currentFilePathRef.current = currentFilePath;
   }, [currentFilePath]);
-
-  useEffect(() => {
-    syncReceivedRef.current = false;
-  }, [currentFilePath]);
-
-  const getFileContent = useCallback(async (relativePath: string) => {
-     if (!rootPath) throw new Error("No root path open");
-     const sep = rootPath.includes("\\") ? "\\" : "/";
-     const absPath = `${rootPath}${sep}${relativePath}`;
-     return await invoke<string>("read_file_content", { path: absPath });
-  }, [rootPath]);
-
-  const onFileContentReceived = useCallback((data: number[]) => {
-      if (!editor) return;
-
-      // FIX: If we have already synced/edited this file, ignore the incoming "init" content
-      // from the Host (which is likely just the disk version) and send them OUR latest state.
-      if (syncReceivedRef.current) {
-          console.log("Preserving local edits against Host disk load. Sending update to Host.");
-          if (ydoc && relativeFilePath) {
-             const state = Y.encodeStateAsUpdate(ydoc);
-             invoke("broadcast_update", { 
-                path: relativeFilePath, 
-                data: Array.from(state) 
-             }).catch(console.error);
-          }
-          return;
-      }
-
-      try {
-          const content = new TextDecoder().decode(new Uint8Array(data));
-          
-          suppressBroadcastRef.current = true;
-          try {
-            const jsonContent = JSON.parse(content);
-            if (jsonContent.type === 'doc' && Array.isArray(jsonContent.content)) {
-              editor.commands.setContent(jsonContent);
-            } else {
-              editor.commands.setContent(content, { contentType: 'markdown' });
-            }
-          } catch (e) {
-            editor.commands.setContent(content, { contentType: 'markdown' });
-          }
-          suppressBroadcastRef.current = false;
-
-          setIsSyncing(false);
-          syncReceivedRef.current = true; 
-      } catch (e) {
-          console.error("Failed to set content", e);
-      }
-  }, [editor, ydoc, relativeFilePath]);
-
-  const onSyncReceived = useCallback(() => {
-      setIsSyncing(false);
-      syncReceivedRef.current = true;
-  }, []);
 
   const handleProjectReceived = useCallback(async (data: number[]) => {
     let destPath: string | null = null;
@@ -170,35 +113,25 @@ function App() {
     requestSync,
     myAddresses 
   } = useP2P(
-      ydoc, 
-      relativeFilePath, 
       handleProjectReceived,
-      getFileContent, 
-      onFileContentReceived,
-      onSyncReceived,
-      handleHostDisconnect // Pass the callback
+      handleHostDisconnect
   );
 
-  const handleForceHost = async () => {
-    if (!rootPath || !myPeerId) return;
-    setStatus("Forcing host claim...");
-    isAutoJoining.current = false;
-    
-    const sep = rootPath.includes("\\") ? "\\" : "/";
-    const metaPath = `${rootPath}${sep}${META_FILE}`;
-    
-    try {
-        await invoke("write_file_content", { 
-            path: metaPath, 
-            content: JSON.stringify({ hostId: myPeerId, hostAddrs: myAddresses }, null, 2) 
-        });
-        await invoke("push_changes", { path: rootPath, sshKeyPath: sshKeyPath });
-        setStatus("Host claimed (Forced).");
-        window.location.reload(); 
-    } catch (e) {
-        setWarningMsg("Failed to force host: " + e);
+  useEffect(() => {
+    if (relativeFilePath) {
+      const doc = documentRegistry.getOrCreateDoc(relativeFilePath);
+      setCurrentDoc(doc);
+      if (!isHost && requestSync) {
+        requestSync(relativeFilePath);
+        setIsSyncing(true);
+      } else {
+        // If host, we might want to reset the syncing status
+        setIsSyncing(false);
+      }
+    } else {
+      setCurrentDoc(null);
     }
-  };
+  }, [relativeFilePath, isHost, requestSync]);
 
   const isHostRef = useRef(isHost);
   useEffect(() => {
@@ -211,12 +144,16 @@ function App() {
     }
   }, [editor, isJoining]);
 
+
+
+
+
   const negotiateHost = async (retryCount = 0) => {
     if (!rootPath || !myPeerId) return;
     
     setStatus(retryCount > 0 ? `Negotiating (Attempt ${retryCount + 1})...` : "Negotiating host...");
     
-    const sep = rootPath.includes("\\") ? "\\" : "/";
+    const sep = rootPath.includes("\\") ? "\\": "/";
     const metaPath = `${rootPath}${sep}${META_FILE}`;
     const ssh = sshKeyPathRef.current || "";
 
@@ -230,7 +167,8 @@ function App() {
         let metaHost = "";
         let metaAddrs: string[] = [];
         try {
-            const content = await invoke<string>("read_file_content", { path: metaPath });
+            const contentBytes = await invoke<number[]>("read_file_content", { path: metaPath });
+            const content = new TextDecoder().decode(new Uint8Array(contentBytes));
             const json = JSON.parse(content);
             metaHost = json.hostId;
             metaAddrs = json.hostAddrs || [];
@@ -243,7 +181,7 @@ function App() {
             if (deadHostIdRef.current && metaHost === deadHostIdRef.current) {
                 console.log("Ignoring disconnected host ID in meta file.");
             } else {
-                if (!isHostRef.current) return;
+                if (!isHost) return;
 
                 setStatus(`Found host ${metaHost.slice(0,8)}. Joining...`);
                 isAutoJoining.current = true; 
@@ -265,9 +203,10 @@ function App() {
              setStatus("Updating host addresses...");
         }
 
+        const content = new TextEncoder().encode(JSON.stringify({ hostId: myPeerId, hostAddrs: myAddresses }, null, 2));
         await invoke("write_file_content", { 
             path: metaPath, 
-            content: JSON.stringify({ hostId: myPeerId, hostAddrs: myAddresses }, null, 2) 
+            content: Array.from(content)
         });
 
         try {
@@ -306,53 +245,7 @@ function App() {
   }, [isHost, rootPath]);
 
 
-  useEffect(() => {
-    if (currentFilePath && editor) {
-      const loadFromDisk = () => {
-          invoke<string>("read_file_content", { path: currentFilePath })
-            .then((content) => {
-              
-              if (isHost) suppressBroadcastRef.current = true;
 
-              try {
-                const jsonContent = JSON.parse(content);
-                if (jsonContent.type === 'doc' && Array.isArray(jsonContent.content)) {
-                  editor.commands.setContent(jsonContent);
-                } else {
-                  editor.commands.setContent(content, { contentType: 'markdown' });
-                }
-              } catch (e) {
-                editor.commands.setContent(content, { contentType: 'markdown' });
-              }
-              
-              if (isHost) suppressBroadcastRef.current = false;
-              
-              setIsSyncing(false); 
-
-              if (isHost && relativeFilePath) {
-                 const bytes = Array.from(new TextEncoder().encode(content));
-                 invoke("broadcast_file_content", { path: relativeFilePath, data: bytes })
-                    .catch(e => console.error("Failed to broadcast init content", e));
-              }
-            })
-            .catch((e) => {
-                setWarningMsg("Error opening file: " + e);
-                setIsSyncing(false);
-            });
-      };
-
-      if (isHost) {
-        loadFromDisk();
-      } else {
-          if (relativeFilePath) {
-              setIsSyncing(true);
-              requestSync(relativeFilePath);
-          } else {
-              loadFromDisk();
-          }
-      }
-    }
-  }, [currentFilePath, editor, relativeFilePath, isHost, ydoc]);
 
   useEffect(() => {
     if (showSettings && rootPath) {
@@ -373,12 +266,13 @@ function App() {
         setIsPushing(true);
         try {
           if (isHostRef.current) {
-             const sep = currentRoot.includes("\\") ? "\\" : "/";
+             const sep = currentRoot.includes("\\") ? "\\": "/";
              const metaPath = `${currentRoot}${sep}${META_FILE}`;
+             const content = new TextEncoder().encode(JSON.stringify({ hostId: "" }, null, 2));
              try {
                 await invoke("write_file_content", { 
                     path: metaPath, 
-                    content: JSON.stringify({ hostId: "" }, null, 2) 
+                    content: Array.from(content)
                 });
              } catch (e) {
                 console.error("Failed to clear host ID:", e);
@@ -401,22 +295,31 @@ function App() {
 
   const handleOpenFolder = async () => {
     if (rootPath) {
-      try { await invoke("push_changes", { path: rootPath, sshKeyPath: sshKeyPath || "" }); } catch (e) { return; }
-    }
-
-    const path = prompt("Enter absolute folder path to open:");
-    if (path) {
-      setRootPath(path);
-      setFileSystemRefresh(prev => prev + 1);
-      setDetectedRemote("");
-      try {
-        await invoke<string>("init_git_repo", { path });
-        const remote = await invoke<string>("get_remote_origin", { path });
-        setDetectedRemote(remote);
-      } catch (e) {
-        console.log("Git Init/Check status:", e);
+      try { 
+        await invoke("push_changes", { path: rootPath, sshKeyPath: sshKeyPath || "" }); 
+      } catch (e) { 
+        console.error("Failed to push changes for previous folder, but proceeding anyway:", e);
       }
     }
+
+    setTimeout(() => {
+      try {
+        const path = prompt("Enter absolute folder path to open:");
+        if (path) {
+          setRootPath(path);
+          setFileSystemRefresh(prev => prev + 1);
+          setDetectedRemote("");
+          try {
+            invoke<string>("init_git_repo", { path });
+            invoke<string>("get_remote_origin", { path }).then(setDetectedRemote);
+          } catch (e) {
+            console.log("Git Init/Check status:", e);
+          }
+        }
+      } catch (e) {
+        setWarningMsg("Could not open folder prompt: " + e);
+      }
+    }, 50);
   };
 
   const handleQuit = async () => {
@@ -437,46 +340,11 @@ function App() {
     editor?.commands.clearContent();
   };
 
-  const handleSave = async () => {
-    if (!currentFilePath) {
-      handleSaveAs();
-      return;
-    }
-    await saveToDisk(currentFilePath);
-  };
-
-  const handleSaveAs = async () => {
-    const defaultName = currentFilePath || (rootPath ? `${rootPath}/untitled.json` : "untitled.json");
-    const path = prompt("Enter full path to save file:", defaultName);
-    if (path) {
-      await saveToDisk(path);
-      setCurrentFilePath(path);
-    }
-  };
-
-  const saveToDisk = async (path: string) => {
-    try {
-      if (!editor) return;
-      let content = "";
-      if (path.endsWith(".json")) {
-        content = JSON.stringify(editor.getJSON(), null, 2);
-      } else {
-         content = editor.getText(); 
-      }
-      await invoke("write_file_content", { path, content });
-      setFileSystemRefresh(prev => prev + 1);
-    } catch (e) {
-      setWarningMsg("Error saving: " + e);
-    }
-  };
-
   return (
     <div className="app-layout">
       <MenuBar 
         onNew={handleNewFile}
         onOpenFolder={handleOpenFolder}
-        onSave={handleSave}
-        onSaveAs={handleSaveAs}
         onSettings={() => setShowSettings(true)}
         onQuit={handleQuit}
         currentFile={currentFilePath}
@@ -524,15 +392,6 @@ function App() {
               <h3>P2P Status: {isHost ? "Host" : "Guest"}</h3>
               <p className="status-text">{status}</p>
               
-              {!isHost && status.includes("Joining") && (
-                 <button 
-                   onClick={handleForceHost} 
-                   style={{ marginTop: '10px', width: '100%', background: '#fab387', color: '#1e1e2e', border: 'none', padding: '5px', cursor: 'pointer' }}
-                 >
-                   Stop Joining & Become Host
-                 </button>
-              )}
-
               {incomingRequest && (
                 <IncomingRequest 
                   peerId={incomingRequest} 
