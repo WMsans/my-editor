@@ -1,3 +1,4 @@
+// src-frontend/App.tsx
 import { useState, useEffect, useRef, useCallback } from "react";
 import { EditorContent } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus" 
@@ -11,7 +12,7 @@ import { WarningModal } from "./components/WarningModal";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SlashMenu } from "./components/SlashMenu"; 
-import * as Y from "yjs";
+import * as Y from "yjs"; 
 import "./App.css";
 
 const META_FILE = ".collab_meta.json";
@@ -41,13 +42,12 @@ function App() {
   const deadHostIdRef = useRef<string | null>(null);
   const suppressBroadcastRef = useRef(false);
 
-  // Global Registry of Y.Docs for all files (open or closed)
+  // Global Registry of Y.Docs
   const docRegistry = useRef<Map<string, Y.Doc>>(new Map());
   const [currentDoc, setCurrentDoc] = useState<Y.Doc | null>(null);
 
   const relativeFilePath = getRelativePath(rootPath, currentFilePath);
   
-  // Initialize Editor with the SPECIFIC doc for the current file
   const { editor } = useCollaborativeEditor(currentDoc, relativeFilePath, suppressBroadcastRef);
   
   const rootPathRef = useRef(rootPath);
@@ -55,34 +55,30 @@ function App() {
   const isAutoJoining = useRef(false); 
   const currentFilePathRef = useRef(currentFilePath);
 
+  // Refs for debouncing/locking negotiation
+  const negotiatingLock = useRef(false);
+  const addressUpdateTimer = useRef<number | null>(null);
+
   useEffect(() => { rootPathRef.current = rootPath; }, [rootPath]);
   useEffect(() => { sshKeyPathRef.current = sshKeyPath; localStorage.setItem("sshKeyPath", sshKeyPath); }, [sshKeyPath]);
   useEffect(() => { currentFilePathRef.current = currentFilePath; }, [currentFilePath]);
 
   // Helper to get or create a Doc for ANY path
   const getDoc = useCallback(async (relativePath: string): Promise<Y.Doc> => {
-      // 1. Return existing
       if (docRegistry.current.has(relativePath)) {
           return docRegistry.current.get(relativePath)!;
       }
 
-      // 2. Create new
       const newDoc = new Y.Doc();
       
-      // 3. If we are Host, load initial content from disk into the Doc
-      // Note: If we are Guest, we might prefer to wait for Sync, 
-      // but to be safe we can load disk content (which we got via save_incoming_project)
       if (rootPathRef.current) {
          try {
              const sep = rootPathRef.current.includes("\\") ? "\\" : "/";
              const absPath = `${rootPathRef.current}${sep}${relativePath}`;
              const content = await invoke<string>("read_file_content", { path: absPath });
-             
-             // Very simple initialization for text files
-             // For complex history, this resets history, but it's required for "first load"
              newDoc.getText('default').insert(0, content);
          } catch (e) {
-             // File might not exist yet or error reading, safe to ignore for new files
+             // File might be new or empty, ignore
          }
       }
 
@@ -90,7 +86,6 @@ function App() {
       return newDoc;
   }, []);
 
-  // Sync Handler
   const onSyncReceived = useCallback(() => {
       setIsSyncing(false);
   }, []);
@@ -110,7 +105,6 @@ function App() {
         setRootPath(destPath);
         setFileSystemRefresh(prev => prev + 1);
         setDetectedRemote("");
-        // Clear registry on new project load
         docRegistry.current.clear(); 
       } catch (e) {
         setWarningMsg("Failed to save incoming project: " + e);
@@ -131,7 +125,7 @@ function App() {
     requestSync,
     myAddresses 
   } = useP2P(
-      getDoc, // Pass the registry accessor
+      getDoc, 
       relativeFilePath, 
       handleProjectReceived,
       onSyncReceived,
@@ -145,27 +139,31 @@ function App() {
         return;
     }
 
-    // Load the doc (from registry or disk)
     setIsSyncing(true);
-    getDoc(relativeFilePath).then(doc => {
-        setCurrentDoc(doc);
-        setIsSyncing(false);
-        
-        // If we are guest and this is a fresh doc (empty history?), request sync
-        if (!isHost) {
-             requestSync(relativeFilePath);
-        }
-    });
+    getDoc(relativeFilePath)
+        .then(doc => {
+            setCurrentDoc(doc);
+            setIsSyncing(false);
+            if (!isHost) {
+                requestSync(relativeFilePath);
+            }
+        })
+        .catch(e => {
+            console.error("Error loading doc:", e);
+            setIsSyncing(false);
+        });
   }, [relativeFilePath, isHost, getDoc]);
 
+  // --- Negotiation Logic ---
 
-  // ... (Keep existing Negotiation / Host Logic unchanged) ...
   const handleForceHost = async () => {
     if (!rootPath || !myPeerId) return;
     setStatus("Forcing host claim...");
     isAutoJoining.current = false;
+    
     const sep = rootPath.includes("\\") ? "\\" : "/";
     const metaPath = `${rootPath}${sep}${META_FILE}`;
+    
     try {
         await invoke("write_file_content", { 
             path: metaPath, 
@@ -187,14 +185,28 @@ function App() {
   }, [editor, isJoining]);
 
   const negotiateHost = async (retryCount = 0) => {
-      // ... (Same as original file) ...
-      if (!rootPath || !myPeerId) return;
-      setStatus(retryCount > 0 ? `Negotiating (Attempt ${retryCount + 1})...` : "Negotiating host...");
-      const sep = rootPath.includes("\\") ? "\\" : "/";
-      const metaPath = `${rootPath}${sep}${META_FILE}`;
-      const ssh = sshKeyPathRef.current || "";
-      try {
-        try { await invoke("git_pull", { path: rootPath, sshKeyPath: ssh }); } catch(e) {}
+    if (negotiatingLock.current && retryCount === 0) return;
+    negotiatingLock.current = true;
+
+    if (!rootPath || !myPeerId) {
+        negotiatingLock.current = false;
+        return;
+    }
+    
+    setStatus(retryCount > 0 ? `Negotiating (Attempt ${retryCount + 1})...` : "Negotiating host...");
+    
+    const sep = rootPath.includes("\\") ? "\\" : "/";
+    const metaPath = `${rootPath}${sep}${META_FILE}`;
+    const ssh = sshKeyPathRef.current || "";
+
+    try {
+        // Try to pull first to get latest meta
+        try {
+            await invoke("git_pull", { path: rootPath, sshKeyPath: ssh });
+        } catch (e) {
+            console.log("Git pull skipped/failed:", e);
+        }
+        
         let metaHost = "";
         let metaAddrs: string[] = [];
         try {
@@ -202,47 +214,104 @@ function App() {
             const json = JSON.parse(content);
             metaHost = json.hostId;
             metaAddrs = json.hostAddrs || [];
-        } catch (e) {}
+        } catch (e) {
+            console.log("Meta file missing/invalid.");
+        }
 
+        // 1. If someone else is host, join them
         if (metaHost && metaHost !== myPeerId) {
             if (deadHostIdRef.current && metaHost === deadHostIdRef.current) {
+                console.log("Ignoring disconnected host ID");
             } else {
-                if (!isHostRef.current) return;
+                if (!isHostRef.current) {
+                    negotiatingLock.current = false;
+                    return;
+                }
+
                 setStatus(`Found host ${metaHost.slice(0,8)}. Joining...`);
                 isAutoJoining.current = true; 
                 sendJoinRequest(metaHost, metaAddrs);
+                negotiatingLock.current = false;
                 return; 
             }
         }
+
+        // 2. If I am host, check if update is needed
         if (metaHost === myPeerId) {
-             setStatus("I am the host (verified).");
-             return; 
+             const sortedSaved = [...metaAddrs].sort();
+             const sortedCurrent = [...myAddresses].sort();
+             
+             if (JSON.stringify(sortedSaved) === JSON.stringify(sortedCurrent)) {
+                 setStatus("I am the host (verified).");
+                 negotiatingLock.current = false;
+                 return; 
+             }
+             setStatus("Updating host addresses...");
         }
+
+        // 3. Claim Host / Update Addresses
         await invoke("write_file_content", { 
             path: metaPath, 
             content: JSON.stringify({ hostId: myPeerId, hostAddrs: myAddresses }, null, 2) 
         });
-        await invoke("push_changes", { path: rootPath, sshKeyPath: ssh });
-        setStatus("Host claimed and synced.");
-        deadHostIdRef.current = null;
+
+        try {
+            await invoke("push_changes", { path: rootPath, sshKeyPath: ssh });
+            setStatus("Host claimed and synced.");
+            deadHostIdRef.current = null;
+        } catch (e) {
+            console.error("Push failed:", e);
+            if (retryCount < 2) {
+                // Wait before retry
+                setTimeout(() => negotiateHost(retryCount + 1), 2000);
+                return; // Keep lock true
+            } else {
+                setWarningMsg("Could not sync host status to remote.\n\nRunning in offline/local host mode.");
+                setStatus("Host (Offline/Local)");
+            }
+        }
+
     } catch (e) {
-        console.error("Negotiation error", e);
-        if (retryCount < 2) setTimeout(() => negotiateHost(retryCount + 1), 2000);
-        else { setWarningMsg("Offline/Local Host Mode"); setStatus("Host (Offline/Local)"); }
+        console.error("Negotiation fatal error:", e);
     }
+    
+    negotiatingLock.current = false;
   };
 
+  // --- Effect: Debounce Address Updates ---
   useEffect(() => {
-    if (rootPath && myPeerId) negotiateHost();
+    if (rootPath && myPeerId) {
+        // Clear existing timer
+        if (addressUpdateTimer.current) {
+            window.clearTimeout(addressUpdateTimer.current);
+        }
+
+        // If this is the FIRST run (initializing), run almost immediately
+        if (status === "Initializing...") {
+             negotiateHost();
+        } else {
+            // Otherwise wait for addresses to settle (2 seconds)
+            addressUpdateTimer.current = window.setTimeout(() => {
+                negotiateHost();
+            }, 2000);
+        }
+    }
+    return () => {
+        if (addressUpdateTimer.current) window.clearTimeout(addressUpdateTimer.current);
+    }
   }, [rootPath, myPeerId, myAddresses]); 
 
+  // --- Effect: Host Status Changed ---
   const prevIsHost = useRef(isHost);
   useEffect(() => {
-    if (!prevIsHost.current && isHost && rootPath) negotiateHost();
+    if (!prevIsHost.current && isHost && rootPath) {
+        negotiateHost();
+    }
     prevIsHost.current = isHost;
   }, [isHost, rootPath]);
 
-  // ... (Keep existing Save/Quit/File Handlers) ...
+
+  // --- File/Menu Handlers ---
 
   const handleOpenFolder = async () => {
     if (rootPath) {
@@ -253,7 +322,7 @@ function App() {
       setRootPath(path);
       setFileSystemRefresh(prev => prev + 1);
       setDetectedRemote("");
-      docRegistry.current.clear(); // Clear docs on folder change
+      docRegistry.current.clear();
       try {
         await invoke<string>("init_git_repo", { path });
         const remote = await invoke<string>("get_remote_origin", { path });
