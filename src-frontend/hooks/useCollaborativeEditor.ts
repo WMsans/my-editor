@@ -4,42 +4,38 @@ import Collaboration from "@tiptap/extension-collaboration";
 import { Markdown } from "@tiptap/markdown";
 import BubbleMenuExtension from "@tiptap/extension-bubble-menu"; 
 import * as Y from "yjs";
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 import { registry } from "../mod-engine/Registry";
 import "../mods/SimulationBlock"; 
 
 export function useCollaborativeEditor(
-  currentFilePath: string | null, 
+  doc: Y.Doc | null, 
   channelId: string | null,
   suppressBroadcastRef?: React.MutableRefObject<boolean>
 ) {
   
-  // Create a fresh YDoc when the file path changes
-  const ydoc = useMemo(() => new Y.Doc(), [currentFilePath]);
-
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ 
         // @ts-ignore
         history: false 
       }),
-      Collaboration.configure({ document: ydoc }),
+      Collaboration.configure({ document: doc || new Y.Doc() }), 
       Markdown,
       BubbleMenuExtension,
       ...registry.getExtensions()
     ],
     editorProps: { attributes: { class: "editor-content" } },
-  }, [currentFilePath, ydoc]);
+  }, [doc]);
 
-  // Broadcast updates using the RELATIVE path (channelId)
+  // Broadcast updates
   useEffect(() => {
-    if (!channelId) return;
+    if (!channelId || !doc) return;
 
-    // Check the 'origin' of the update
     const handleUpdate = (update: Uint8Array, origin: any) => {
-      // FIX: If the update came from 'p2p' (applied by useP2P), do NOT broadcast it back.
+      // If the update came from 'p2p' (applied by useP2P), do NOT broadcast it back.
       if (origin === 'p2p') return;
 
       if (suppressBroadcastRef?.current) return;
@@ -50,11 +46,11 @@ export function useCollaborativeEditor(
       }).catch((e) => console.error("Broadcast failed", e));
     };
     
-    ydoc.on("update", handleUpdate);
+    doc.on("update", handleUpdate);
     return () => {
-      ydoc.off("update", handleUpdate);
+      doc.off("update", handleUpdate);
     };
-  }, [ydoc, channelId, suppressBroadcastRef]);
+  }, [doc, channelId, suppressBroadcastRef]);
 
-  return { editor, ydoc };
+  return { editor };
 }

@@ -4,13 +4,11 @@ import { listen } from "@tauri-apps/api/event";
 import * as Y from "yjs";
 
 export function useP2P(
-  ydoc: Y.Doc, 
+  getDoc: (path: string) => Promise<Y.Doc>, 
   currentRelativePath: string | null, 
   onProjectReceived: (data: number[]) => void,
-  getFileContent: (path: string) => Promise<string>,
-  onFileContentReceived: (data: number[]) => void,
   onSyncReceived?: () => void,
-  onHostDisconnect?: (hostId: string) => void //
+  onHostDisconnect?: (hostId: string) => void
 ) {
   const [myPeerId, setMyPeerId] = useState<string | null>(null);
   const [incomingRequest, setIncomingRequest] = useState<string | null>(null);
@@ -23,11 +21,6 @@ export function useP2P(
   useEffect(() => {
     isHostRef.current = isHost;
   }, [isHost]);
-
-  const hasSyncedRef = useRef(false);
-  useEffect(() => {
-    hasSyncedRef.current = false;
-  }, [currentRelativePath]);
 
   useEffect(() => {
     invoke<string>("get_local_peer_id").then(setMyPeerId).catch(() => {});
@@ -60,58 +53,42 @@ export function useP2P(
       listen<string>("host-disconnected", (e) => {
         setStatus(`⚠ Host disconnected! Negotiating...`);
         setIsHost(true);
-        if (onHostDisconnect) onHostDisconnect(e.payload); //
+        if (onHostDisconnect) onHostDisconnect(e.payload);
       }),
       
-      listen<{ path: string, data: number[] }>("p2p-sync", (e) => {
-        if (currentRelativePath && e.payload.path === currentRelativePath) {
-            // FIX: Allow Host to also clear their doc if they are receiving 
-            // the first sync packet (e.g., a full state push from a Guest).
-            if (!hasSyncedRef.current) {
-                // Modified: Only clear if we are NOT the host. 
-                // The Host has authoritative content and should not be wiped by an incoming update.
-                if (!isHostRef.current) {
-                    try {
-                        const fragment = ydoc.getXmlFragment("default");
-                        fragment.delete(0, fragment.length);
-                    } catch (e) {
-                        console.error("Failed to clear YDoc:", e);
-                    }
-                }
-                hasSyncedRef.current = true;
+      // Global Sync Handler
+      listen<{ path: string, data: number[] }>("p2p-sync", async (e) => {
+        try {
+            // Get or create doc for ANY path
+            const doc = await getDoc(e.payload.path);
+            
+            // Apply update
+            Y.applyUpdate(doc, new Uint8Array(e.payload.data), 'p2p');
+            
+            // If it happens to be the current file, trigger the callback to update UI loading state
+            if (currentRelativePath && e.payload.path === currentRelativePath) {
+                if (onSyncReceived) onSyncReceived();
             }
-            Y.applyUpdate(ydoc, new Uint8Array(e.payload.data), 'p2p');
-            if (onSyncReceived) onSyncReceived();
-        }
-      }),
-      listen<{ path: string, data: number[] }>("p2p-file-content", (e) => {
-        if (currentRelativePath && e.payload.path === currentRelativePath) {
-           onFileContentReceived(e.payload.data);
-           hasSyncedRef.current = true;
+        } catch (err) {
+            console.error("Failed to apply global p2p sync:", err);
         }
       }),
       
+      // Handle file content requests (Full Sync)
       listen<{ path: string }>("sync-requested", async (e) => {
         const requestedPath = e.payload.path;
-        if (currentRelativePath && requestedPath === currentRelativePath) {
-            const state = Y.encodeStateAsUpdate(ydoc);
+        
+        try {
+            // Get the current state of the requested doc
+            const doc = await getDoc(requestedPath);
+            const state = Y.encodeStateAsUpdate(doc);
+            
             invoke("broadcast_update", { 
-                path: currentRelativePath, 
+                path: requestedPath, 
                 data: Array.from(state) 
             }).catch(console.error);
-        } else {
-            if (isHostRef.current) {
-                try {
-                    const content = await getFileContent(requestedPath);
-                    const data = Array.from(new TextEncoder().encode(content));
-                    invoke("broadcast_file_content", {
-                        path: requestedPath,
-                        data: data
-                    });
-                } catch (err) {
-                    console.error(`Could not sync requested file ${requestedPath}:`, err);
-                }
-            }
+        } catch (err) {
+            console.error(`Could not sync requested file ${requestedPath}:`, err);
         }
       })
     ];
@@ -119,7 +96,7 @@ export function useP2P(
     return () => {
       listeners.forEach((l) => l.then((unlisten) => unlisten()));
     };
-  }, [ydoc, onProjectReceived, currentRelativePath, getFileContent, onFileContentReceived, onSyncReceived, onHostDisconnect]);
+  }, [getDoc, onProjectReceived, currentRelativePath, onSyncReceived, onHostDisconnect]);
 
   const sendJoinRequest = async (peerId: string, remoteAddrs: string[] = []) => {
     try {
