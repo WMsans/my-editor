@@ -1,4 +1,8 @@
+// src-frontend/App.tsx
 import { useState, useEffect, useRef, useCallback } from "react";
+import * as Y from "yjs"; // Import Yjs
+import { invoke } from "@tauri-apps/api/core"; // Import invoke
+import { documentRegistry } from "./mod-engine/DocumentRegistry"; // Import Registry
 
 // Logic Hooks
 import { useP2P } from "./hooks/useP2P";
@@ -25,7 +29,7 @@ function App() {
   const {
     rootPath, rootPathRef,
     currentFilePath, setCurrentFilePath, currentFilePathRef,
-    fileSystemRefresh,
+    fileSystemRefresh, setFileSystemRefresh,
     sshKeyPath, setSshKeyPath, sshKeyPathRef,
     detectedRemote, refreshRemoteOrigin,
     isAutoJoining,
@@ -38,7 +42,6 @@ function App() {
       deadHostIdRef.current = hostId;
   }, []);
   
-  // We will create a mutable ref to hold the setIsSyncing function so we can pass it to callbacks
   const setIsSyncingRef = useRef<(v: boolean) => void>(() => {});
 
   const handleFileSync = useCallback((syncedPath: string) => {
@@ -82,7 +85,8 @@ function App() {
   });
 
   // --- Editor Manager Hook ---
-  const { editor, isSyncing, setIsSyncing } = useEditorManager(
+  // Now returns currentDoc
+  const { editor, isSyncing, setIsSyncing, currentDoc } = useEditorManager(
     rootPath,
     currentFilePath,
     getRelativePath,
@@ -91,18 +95,54 @@ function App() {
     requestSync
   );
 
-  // Update the ref so handleFileSync can use it
   useEffect(() => { setIsSyncingRef.current = setIsSyncing; }, [setIsSyncing]);
+  useEffect(() => { if (showSettings) refreshRemoteOrigin(); }, [showSettings, refreshRemoteOrigin]);
 
-  // --- Settings Effect ---
-  useEffect(() => {
-    if (showSettings) refreshRemoteOrigin();
-  }, [showSettings, refreshRemoteOrigin]);
-
-  // --- Wrapper for New File to clear editor ---
   const onNewFileClick = () => {
     handleNewFile();
     editor?.commands.clearContent();
+  };
+
+  // --- Handle Save Logic ---
+  const handleSave = async () => {
+    if (!rootPath) {
+        setWarningMsg("Cannot save: No project folder opened.");
+        return;
+    }
+
+    try {
+        if (currentFilePath) {
+            // Save existing file
+            const relPath = getRelativePath(currentFilePath);
+            if (relPath) {
+                await documentRegistry.manualSave(relPath);
+                // Optionally show a "Saved" toast here
+            }
+        } else {
+            // Save new file (Save As)
+            const name = prompt("Enter file name (e.g., page.md):");
+            if (!name) return;
+
+            const sep = rootPath.includes("\\") ? "\\" : "/";
+            const newPath = `${rootPath}${sep}${name}`;
+            
+            // Encode the content of the current (untitled) document
+            const content = Y.encodeStateAsUpdate(currentDoc);
+
+            // Write to disk
+            await invoke("write_file_content", { 
+                path: newPath, 
+                content: Array.from(content) 
+            });
+
+            // Update state to point to the new file
+            // Trigger refresh to show in sidebar
+            setFileSystemRefresh(prev => prev + 1);
+            setCurrentFilePath(newPath);
+        }
+    } catch (e: any) {
+        setWarningMsg(`Failed to save file: ${e.toString()}`);
+    }
   };
 
   return (
@@ -112,6 +152,7 @@ function App() {
         onOpenFolder={handleOpenFolder}
         onSettings={() => setShowSettings(true)}
         onQuit={handleQuit}
+        onSave={handleSave} // Pass the save handler
         currentFile={currentFilePath}
       />
       

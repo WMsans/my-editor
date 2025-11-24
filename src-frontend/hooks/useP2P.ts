@@ -1,17 +1,13 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import * as Y from "yjs";
 import { documentRegistry } from "../mod-engine/DocumentRegistry";
 
 export function useP2P(
-
   onProjectReceived: (data: number[]) => void,
-
   onHostDisconnect?: (hostId: string) => void,
-
   onFileSync?: (path: string) => void
-
 ) {
   const [myPeerId, setMyPeerId] = useState<string | null>(null);
   const [incomingRequest, setIncomingRequest] = useState<string | null>(null);
@@ -80,7 +76,8 @@ export function useP2P(
     };
   }, [onProjectReceived, onHostDisconnect, onFileSync]);
 
-  const sendJoinRequest = async (peerId: string, remoteAddrs: string[] = []) => {
+  // WRAPPED IN CALLBACK TO PREVENT INFINITE LOOPS
+  const sendJoinRequest = useCallback(async (peerId: string, remoteAddrs: string[] = []) => {
     try {
       setIsJoining(true);
       setStatus(`Requesting to join ${peerId.slice(0, 8)}...`);
@@ -89,9 +86,9 @@ export function useP2P(
       setIsJoining(false);
       setStatus(`Error joining: ${e}`);
     }
-  };
+  }, []);
 
-  const acceptRequest = async (currentPath: string) => {
+  const acceptRequest = useCallback(async (currentPath: string) => {
     if (!incomingRequest) return;
     if (!currentPath) {
         setStatus("Cannot accept: No folder opened to share.");
@@ -107,17 +104,17 @@ export function useP2P(
     } catch (e) {
       setStatus(`Error accepting: ${e}`);
     }
-  };
+  }, [incomingRequest]);
 
-  const rejectRequest = () => setIncomingRequest(null);
+  const rejectRequest = useCallback(() => setIncomingRequest(null), []);
 
-  const requestSync = async (path: string) => {
+  const requestSync = useCallback(async (path: string) => {
     try {
       await invoke("request_file_sync", { path });
     } catch (e) {
       console.error("Failed to request sync", e);
     }
-  };
+  }, []);
 
   return {
     myPeerId,

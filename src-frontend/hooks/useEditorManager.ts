@@ -11,7 +11,7 @@ export function useEditorManager(
   isJoining: boolean,
   requestSync: (path: string) => Promise<void>
 ) {
-  const [currentDoc, setCurrentDoc] = useState<Y.Doc | null>(null);
+  const [currentDoc, setCurrentDoc] = useState<Y.Doc>(() => new Y.Doc());
   const [isSyncing, setIsSyncing] = useState(false);
   
   const relativeFilePath = getRelativePath(currentFilePath);
@@ -26,12 +26,21 @@ export function useEditorManager(
     }
   }, [editor, isJoining]);
 
-  // Load Document & Sync
+  // Effect 1: Handle Document Loading (Separated from Syncing)
   useEffect(() => {
     if (relativeFilePath) {
       const doc = documentRegistry.getOrCreateDoc(relativeFilePath);
       setCurrentDoc(doc);
-      
+    } else {
+      // For new/untitled files, create a fresh detached document
+      // This will only run when switching to a "new file" state
+      setCurrentDoc(new Y.Doc());
+    }
+  }, [relativeFilePath]); // Only depends on the file path, not syncing props
+
+  // Effect 2: Handle Syncing
+  useEffect(() => {
+    if (relativeFilePath) {
       // If guest, request sync for this file
       if (!isHost && requestSync) {
         requestSync(relativeFilePath);
@@ -40,13 +49,14 @@ export function useEditorManager(
         setIsSyncing(false);
       }
     } else {
-      setCurrentDoc(null);
+      setIsSyncing(false);
     }
   }, [relativeFilePath, isHost, requestSync]);
 
   return { 
     editor, 
     isSyncing, 
-    setIsSyncing 
+    setIsSyncing,
+    currentDoc 
   };
 }
