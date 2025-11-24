@@ -51,6 +51,8 @@ function App() {
 
   useEffect(() => {
     rootPathRef.current = rootPath;
+    // FIX: Update the registry with the new root path
+    documentRegistry.setRootPath(rootPath);
   }, [rootPath]);
 
   useEffect(() => {

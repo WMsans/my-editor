@@ -11,9 +11,29 @@ interface DocEntry {
 
 class DocumentRegistry {
   private docs: Map<string, DocEntry> = new Map();
+  private rootPath: string = "";
 
   constructor() {
     // Potentially initialize with documents from a persisted state in the future
+  }
+
+  public setRootPath(path: string) {
+    this.rootPath = path;
+  }
+
+  private getAbsolutePath(relativePath: string): string {
+    if (!this.rootPath) return relativePath;
+    
+    const sep = this.rootPath.includes("\\") ? "\\" : "/";
+    let root = this.rootPath;
+    // Remove trailing slash if present
+    if (root.endsWith(sep)) root = root.slice(0, -1);
+    
+    let rel = relativePath;
+    // Remove leading slash if present
+    if (rel.startsWith("/") || rel.startsWith("\\")) rel = rel.slice(1);
+    
+    return `${root}${sep}${rel}`;
   }
 
   /**
@@ -75,10 +95,13 @@ class DocumentRegistry {
   private attachSaveHandler(path: string, entry: DocEntry) {
     const debouncedSave = debounce(() => {
         const content = Y.encodeStateAsUpdate(entry.doc);
-        invoke("write_file_content", { path, content: Array.from(content) })
+        // FIX: Resolve to absolute path before writing
+        const absolutePath = this.getAbsolutePath(path);
+
+        invoke("write_file_content", { path: absolutePath, content: Array.from(content) })
             .then(() => {
                 entry.isSynced = true; // Mark as synced after successful save
-                console.log(`Saved ${path} to disk.`);
+                console.log(`Saved ${path} to disk at ${absolutePath}`);
             })
             .catch(e => console.error(`Failed to save ${path}:`, e));
     }, 1000); // 1-second debounce
@@ -107,7 +130,10 @@ class DocumentRegistry {
     }
 
     try {
-      const content: number[] = await invoke("read_file_content", { path });
+      // FIX: Resolve to absolute path before reading
+      const absolutePath = this.getAbsolutePath(path);
+      const content: number[] = await invoke("read_file_content", { path: absolutePath });
+      
       if (content && content.length > 0) {
         // Apply the loaded content without triggering an 'update' event that would be broadcast
         Y.applyUpdate(doc, new Uint8Array(content), 'disk');
