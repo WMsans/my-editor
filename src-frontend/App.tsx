@@ -15,6 +15,10 @@ import * as Y from "yjs"; // Import Yjs
 import "./App.css";
 
 const META_FILE = ".collab_meta.json";
+const DEFAULT_DOC_KEY = "__default__";
+
+const buildSessionId = (rootPath: string | null) => rootPath ? `folder:${rootPath}` : null;
+const buildDocKey = (relativePath: string | null) => relativePath || DEFAULT_DOC_KEY;
 
 const getRelativePath = (root: string, file: string | null) => {
   if (!root || !file) return null;
@@ -37,13 +41,28 @@ function App() {
   const [pendingQuit, setPendingQuit] = useState(false);
   const [isPushing, setIsPushing] = useState(false); 
   const [isSyncing, setIsSyncing] = useState(false);
-  const syncReceivedRef = useRef(false); 
+  const syncReceivedRef = useRef(false);
   const deadHostIdRef = useRef<string | null>(null);
-  
-  const suppressBroadcastRef = useRef(false);
 
+  const suppressBroadcastRef = useRef(false);
+  const yDocsRef = useRef<Map<string, Y.Doc>>(new Map());
+  const pendingContentRef = useRef<Map<string, number[]>>(new Map());
+
+  const sessionId = buildSessionId(rootPath || null);
   const relativeFilePath = getRelativePath(rootPath, currentFilePath);
-  const { editor, ydoc } = useCollaborativeEditor(currentFilePath, relativeFilePath, suppressBroadcastRef);
+  const [currentDocKey, setCurrentDocKey] = useState(buildDocKey(relativeFilePath));
+
+  const getDocForKey = useCallback((key: string) => {
+    let doc = yDocsRef.current.get(key);
+    if (!doc) {
+      doc = new Y.Doc();
+      yDocsRef.current.set(key, doc);
+    }
+    return doc;
+  }, []);
+
+  const [activeDoc, setActiveDoc] = useState<Y.Doc>(() => getDocForKey(currentDocKey));
+  const { editor } = useCollaborativeEditor(activeDoc, sessionId ? `${sessionId}::${currentDocKey}` : null, suppressBroadcastRef);
   
   const rootPathRef = useRef(rootPath);
   const sshKeyPathRef = useRef(sshKeyPath);
@@ -53,6 +72,14 @@ function App() {
   useEffect(() => {
     rootPathRef.current = rootPath;
   }, [rootPath]);
+
+  useEffect(() => {
+    yDocsRef.current = new Map();
+    pendingContentRef.current = new Map();
+    const newKey = buildDocKey(relativeFilePath);
+    setCurrentDocKey(newKey);
+    setActiveDoc(getDocForKey(newKey));
+  }, [sessionId]);
 
   useEffect(() => {
     sshKeyPathRef.current = sshKeyPath;
@@ -65,50 +92,76 @@ function App() {
 
   useEffect(() => {
     syncReceivedRef.current = false;
-  }, [currentFilePath]);
+  }, [currentDocKey]);
 
-  const getFileContent = useCallback(async (relativePath: string) => {
+  useEffect(() => {
+    const newKey = buildDocKey(relativeFilePath);
+    setCurrentDocKey(newKey);
+    setActiveDoc(getDocForKey(newKey));
+  }, [relativeFilePath, getDocForKey]);
+
+  const getFileContent = useCallback(async (pathKey: string) => {
      if (!rootPath) throw new Error("No root path open");
+     if (pathKey === DEFAULT_DOC_KEY) throw new Error("No file selected");
      const sep = rootPath.includes("\\") ? "\\" : "/";
-     const absPath = `${rootPath}${sep}${relativePath}`;
+     const absPath = `${rootPath}${sep}${pathKey}`;
      return await invoke<string>("read_file_content", { path: absPath });
   }, [rootPath]);
 
-  const onFileContentReceived = useCallback((data: number[]) => {
-      if (!editor) return;
+  const setEditorContentFromString = useCallback((content: string) => {
+    if (!editor) return;
 
-      // REMOVED: The logic that preserved local edits against Host disk load.
-      // This caused duplication because the Guest would reject the Host's "Reset"
-      // and instead push back its own state (with old IDs) which the Host would merge.
-      // Now, Guests implicitly accept the Host's authoritative state when sent.
+    suppressBroadcastRef.current = true;
+    try {
+      const jsonContent = JSON.parse(content);
+      if (jsonContent.type === 'doc' && Array.isArray(jsonContent.content)) {
+        editor.commands.setContent(jsonContent);
+      } else {
+        editor.commands.setContent(content, { contentType: 'markdown' });
+      }
+    } catch (e) {
+      editor.commands.setContent(content, { contentType: 'markdown' });
+    }
+    suppressBroadcastRef.current = false;
+  }, [editor]);
 
+  useEffect(() => {
+    if (!editor) return;
+    const pending = pendingContentRef.current.get(currentDocKey);
+    if (!pending) return;
+
+    pendingContentRef.current.delete(currentDocKey);
+    try {
+      const content = new TextDecoder().decode(new Uint8Array(pending));
+      setEditorContentFromString(content);
+      setIsSyncing(false);
+      syncReceivedRef.current = true;
+    } catch (e) {
+      console.error("Failed to apply pending content", e);
+    }
+  }, [editor, currentDocKey, setEditorContentFromString]);
+
+  const onFileContentReceived = useCallback((pathKey: string, data: number[]) => {
       try {
           const content = new TextDecoder().decode(new Uint8Array(data));
-          
-          suppressBroadcastRef.current = true;
-          try {
-            const jsonContent = JSON.parse(content);
-            if (jsonContent.type === 'doc' && Array.isArray(jsonContent.content)) {
-              editor.commands.setContent(jsonContent);
-            } else {
-              editor.commands.setContent(content, { contentType: 'markdown' });
-            }
-          } catch (e) {
-            editor.commands.setContent(content, { contentType: 'markdown' });
-          }
-          suppressBroadcastRef.current = false;
 
-          setIsSyncing(false);
-          syncReceivedRef.current = true; 
+          if (pathKey === currentDocKey && editor) {
+            setEditorContentFromString(content);
+            setIsSyncing(false);
+            syncReceivedRef.current = true;
+          } else {
+            pendingContentRef.current.set(pathKey, data);
+          }
       } catch (e) {
           console.error("Failed to set content", e);
       }
-  }, [editor, ydoc, relativeFilePath]);
+  }, [editor, currentDocKey, setEditorContentFromString]);
 
-  const onSyncReceived = useCallback(() => {
+  const onSyncReceived = useCallback((pathKey: string) => {
+      if (pathKey !== currentDocKey) return;
       setIsSyncing(false);
       syncReceivedRef.current = true;
-  }, []);
+  }, [currentDocKey]);
 
   const handleProjectReceived = useCallback(async (data: number[]) => {
     let destPath: string | null = null;
@@ -148,10 +201,10 @@ function App() {
       deadHostIdRef.current = hostId;
   }, []);
 
-  const { 
+  const {
     myPeerId,
-    incomingRequest, 
-    isHost, 
+    incomingRequest,
+    isHost,
     isJoining,
     status,
     setStatus,
@@ -161,10 +214,10 @@ function App() {
     requestSync,
     myAddresses 
   } = useP2P(
-      ydoc, 
-      relativeFilePath, 
+      sessionId,
+      getDocForKey,
       handleProjectReceived,
-      getFileContent, 
+      getFileContent,
       onFileContentReceived,
       onSyncReceived,
       handleHostDisconnect // Pass the callback
@@ -308,6 +361,7 @@ function App() {
               // that propagates the correct ClientIDs to the Guests.
               // if (isHost) suppressBroadcastRef.current = true;
 
+              suppressBroadcastRef.current = true;
               try {
                 const jsonContent = JSON.parse(content);
                 if (jsonContent.type === 'doc' && Array.isArray(jsonContent.content)) {
@@ -318,10 +372,10 @@ function App() {
               } catch (e) {
                 editor.commands.setContent(content, { contentType: 'markdown' });
               }
-              
-              // if (isHost) suppressBroadcastRef.current = false;
-              
-              setIsSyncing(false); 
+
+              suppressBroadcastRef.current = false;
+
+              setIsSyncing(false);
 
               // MODIFIED: Do not broadcast raw file content as text.
               // The setContent above will trigger a `broadcast_update` (via Yjs)
@@ -345,13 +399,13 @@ function App() {
       } else {
           if (relativeFilePath) {
               setIsSyncing(true);
-              requestSync(relativeFilePath);
+              requestSync(currentDocKey);
           } else {
               loadFromDisk();
           }
       }
     }
-  }, [currentFilePath, editor, relativeFilePath, isHost, ydoc]);
+  }, [currentFilePath, editor, relativeFilePath, isHost, currentDocKey]);
 
   useEffect(() => {
     if (showSettings && rootPath) {

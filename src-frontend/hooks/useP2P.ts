@@ -4,12 +4,12 @@ import { listen } from "@tauri-apps/api/event";
 import * as Y from "yjs";
 
 export function useP2P(
-  ydoc: Y.Doc, 
-  currentRelativePath: string | null, 
+  sessionId: string | null,
+  getDocForKey: (pathKey: string) => Y.Doc,
   onProjectReceived: (data: number[]) => void,
   getFileContent: (path: string) => Promise<string>,
-  onFileContentReceived: (data: number[]) => void,
-  onSyncReceived?: () => void,
+  onFileContentReceived: (pathKey: string, data: number[]) => void,
+  onSyncReceived?: (pathKey: string) => void,
   onHostDisconnect?: (hostId: string) => void //
 ) {
   const [myPeerId, setMyPeerId] = useState<string | null>(null);
@@ -24,10 +24,7 @@ export function useP2P(
     isHostRef.current = isHost;
   }, [isHost]);
 
-  const hasSyncedRef = useRef(false);
-  useEffect(() => {
-    hasSyncedRef.current = false;
-  }, [currentRelativePath]);
+  const hasSyncedForPath = useRef(new Set<string>());
 
   useEffect(() => {
     invoke<string>("get_local_peer_id").then(setMyPeerId).catch(() => {});
@@ -64,57 +61,59 @@ export function useP2P(
       }),
       
       listen<{ path: string, data: number[] }>("p2p-sync", (e) => {
-        if (currentRelativePath && e.payload.path === currentRelativePath) {
-            // FIX: Allow Host to also clear their doc if they are receiving 
-            // the first sync packet (e.g., a full state push from a Guest).
-            if (!hasSyncedRef.current) {
-                // Modified: Only clear if we are NOT the host. 
-                // The Host has authoritative content and should not be wiped by an incoming update.
-                if (!isHostRef.current) {
-                    try {
-                        const fragment = ydoc.getXmlFragment("default");
-                        fragment.delete(0, fragment.length);
-                    } catch (e) {
-                        console.error("Failed to clear YDoc:", e);
-                    }
-                }
-                hasSyncedRef.current = true;
-            }
-            Y.applyUpdate(ydoc, new Uint8Array(e.payload.data), 'p2p');
-            if (onSyncReceived) onSyncReceived();
+        if (!sessionId) return;
+        const [sessionKey, pathKey] = e.payload.path.split("::", 2);
+        if (sessionKey !== sessionId) return;
+
+        const targetDoc = getDocForKey(pathKey || "__default__");
+
+        const syncKey = `${sessionKey}::${pathKey || "__default__"}`;
+        if (!hasSyncedForPath.current.has(syncKey) && !isHostRef.current) {
+          try {
+            const fragment = targetDoc.getXmlFragment("default");
+            fragment.delete(0, fragment.length);
+          } catch (e) {
+            console.error("Failed to clear YDoc:", e);
+          }
+          hasSyncedForPath.current.add(syncKey);
         }
+
+        Y.applyUpdate(targetDoc, new Uint8Array(e.payload.data), "p2p");
+        if (onSyncReceived) onSyncReceived(pathKey || "__default__");
       }),
       listen<{ path: string, data: number[] }>("p2p-file-content", (e) => {
-        if (currentRelativePath && e.payload.path === currentRelativePath) {
-           onFileContentReceived(e.payload.data);
-           // FIX: Do NOT mark hasSyncedRef as true here.
-           // Receiving raw file content is a temporary state. We want the 
-           // subsequent p2p-sync (from the Host opening the file) to trigger
-           // the document clear logic above to prevent duplication.
-        }
+        if (!sessionId) return;
+        const [sessionKey, pathKey] = e.payload.path.split("::", 2);
+        if (sessionKey !== sessionId) return;
+
+        onFileContentReceived(pathKey || "__default__", e.payload.data);
       }),
-      
+
       listen<{ path: string }>("sync-requested", async (e) => {
-        const requestedPath = e.payload.path;
-        if (currentRelativePath && requestedPath === currentRelativePath) {
-            const state = Y.encodeStateAsUpdate(ydoc);
-            invoke("broadcast_update", { 
-                path: currentRelativePath, 
-                data: Array.from(state) 
-            }).catch(console.error);
-        } else {
-            if (isHostRef.current) {
-                try {
-                    const content = await getFileContent(requestedPath);
-                    const data = Array.from(new TextEncoder().encode(content));
-                    invoke("broadcast_file_content", {
-                        path: requestedPath,
-                        data: data
-                    });
-                } catch (err) {
-                    console.error(`Could not sync requested file ${requestedPath}:`, err);
-                }
-            }
+        if (!sessionId) return;
+        const [sessionKey, pathKey] = e.payload.path.split("::", 2);
+        if (sessionKey !== sessionId) return;
+
+        const targetKey = pathKey || "__default__";
+        const targetDoc = getDocForKey(targetKey);
+
+        const state = Y.encodeStateAsUpdate(targetDoc);
+        invoke("broadcast_update", {
+          path: `${sessionId}::${targetKey}`,
+          data: Array.from(state)
+        }).catch(console.error);
+
+        if (isHostRef.current && targetKey) {
+          try {
+            const content = await getFileContent(targetKey);
+            const data = Array.from(new TextEncoder().encode(content));
+            invoke("broadcast_file_content", {
+              path: `${sessionId}::${targetKey}`,
+              data: data
+            });
+          } catch (err) {
+            console.error(`Could not sync requested file ${targetKey}:`, err);
+          }
         }
       })
     ];
@@ -122,7 +121,7 @@ export function useP2P(
     return () => {
       listeners.forEach((l) => l.then((unlisten) => unlisten()));
     };
-  }, [ydoc, onProjectReceived, currentRelativePath, getFileContent, onFileContentReceived, onSyncReceived, onHostDisconnect]);
+  }, [sessionId, getDocForKey, onProjectReceived, getFileContent, onFileContentReceived, onSyncReceived, onHostDisconnect]);
 
   const sendJoinRequest = async (peerId: string, remoteAddrs: string[] = []) => {
     try {
@@ -155,9 +154,10 @@ export function useP2P(
 
   const rejectRequest = () => setIncomingRequest(null);
 
-  const requestSync = async (path: string) => {
+  const requestSync = async (pathKey: string | null) => {
+    if (!sessionId || !pathKey) return;
     try {
-      await invoke("request_file_sync", { path });
+      await invoke("request_file_sync", { path: `${sessionId}::${pathKey}` });
     } catch (e) {
       console.error("Failed to request sync", e);
     }

@@ -1,6 +1,6 @@
 // src-frontend/mod-engine/types.ts
 import { Node, Extension } from "@tiptap/core";
-import { ReactNode } from "react";
+import type { FC } from "react";
 
 export interface BlockProps {
   node: any;
@@ -15,5 +15,5 @@ export interface Mod {
   // The Tiptap extension (Node or Extension)
   extension: Node | Extension;
   // The React component to render for this block (if it's a NodeView)
-  component?: React.FC<BlockProps>;
+  component?: FC<BlockProps>;
 }
