@@ -8,7 +8,9 @@ export function useP2P(
 
   onProjectReceived: (data: number[]) => void,
 
-  onHostDisconnect?: (hostId: string) => void
+  onHostDisconnect?: (hostId: string) => void,
+
+  onFileSync?: (path: string) => void
 
 ) {
   const [myPeerId, setMyPeerId] = useState<string | null>(null);
@@ -59,6 +61,7 @@ export function useP2P(
       
       listen<{ path: string, data: number[] }>("p2p-sync", (e) => {
         documentRegistry.applyUpdate(e.payload.path, new Uint8Array(e.payload.data));
+        if (onFileSync) onFileSync(e.payload.path);
       }),
       
       listen<{ path: string }>("sync-requested", async (e) => {
@@ -75,7 +78,7 @@ export function useP2P(
     return () => {
       listeners.forEach((l) => l.then((unlisten) => unlisten()));
     };
-  }, [onProjectReceived, onHostDisconnect]);
+  }, [onProjectReceived, onHostDisconnect, onFileSync]);
 
   const sendJoinRequest = async (peerId: string, remoteAddrs: string[] = []) => {
     try {

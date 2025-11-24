@@ -102,6 +102,13 @@ function App() {
       deadHostIdRef.current = hostId;
   }, []);
 
+  const handleFileSync = useCallback((syncedPath: string) => {
+      const currentRel = getRelativePath(rootPathRef.current, currentFilePathRef.current);
+      if (currentRel === syncedPath) {
+          setIsSyncing(false);
+      }
+  }, []);
+
   const { 
     myPeerId,
     incomingRequest, 
@@ -116,7 +123,8 @@ function App() {
     myAddresses 
   } = useP2P(
       handleProjectReceived,
-      handleHostDisconnect
+      handleHostDisconnect,
+      handleFileSync
   );
 
   useEffect(() => {
