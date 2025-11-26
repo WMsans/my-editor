@@ -25,8 +25,15 @@ pub fn run() {
             let state_for_thread = peer_state.clone(); 
             
             tauri::async_runtime::spawn(async move {
-                // Pass None for public_ip on the desktop client
-                if let Err(e) = network::start_p2p_node(handle, state_for_thread, rx, None).await {
+                // OPTION 1: Load from Environment Variable (Good for Dev)
+                let bootnodes = std::env::var("BOOTNODE_LIST")
+                    .unwrap_or_else(|_| "/ip4/35.212.216.37/tcp/4001/p2p/12D3KooWBNmqJNCHVjeJMCbbG1WSzx2uazXaXuteuovfGLNpz4xH".to_string())
+                    .split(',')
+                    .map(|s| s.to_string())
+                    .collect();
+
+                // Pass the list to the function
+                if let Err(e) = network::start_p2p_node(handle, state_for_thread, rx, None, bootnodes).await {
                     eprintln!("P2P Network Error: {e}");
                 }
             });

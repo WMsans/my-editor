@@ -43,8 +43,10 @@ async fn main() {
     let _tx = Arc::new(Mutex::new(tx));
     let host = HeadlessHost;
 
+    let bootnodes = vec![];
+
     // Pass public_ip to start_p2p_node
-    if let Err(e) = network::start_p2p_node(host, state, rx, public_ip).await {
+    if let Err(e) = network::start_p2p_node(host, state, rx, public_ip, bootnodes).await {
         eprintln!("Node crashed: {}", e);
     }
 }

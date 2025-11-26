@@ -70,6 +70,7 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
     state: PeerState, 
     mut cmd_rx: Receiver<(String, Payload)>,
     public_ip: Option<String>,
+    boot_nodes: Vec<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     
     let app_data_dir = host.get_app_data_dir();    
@@ -168,12 +169,12 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
     }
 
     // Replace with your actual Bootnode Address
-    let bootnode_str = "/ip4/35.212.216.37/tcp/4001/p2p/12D3KooWQcZw2N3bX3Cn8fhi118QASn2WJmhdLLFS6Y8pm4Tw72R";
-    let bootnodes = [bootnode_str];
-
-    for bootnode in bootnodes {
+    for bootnode in &boot_nodes { 
         if let Ok(addr) = bootnode.parse::<Multiaddr>() {
-            let _ = swarm.dial(addr);
+            // Optional: Don't dial ourselves if we are the bootnode
+            if !addr.to_string().contains(&local_peer_id.to_string()) {
+                let _ = swarm.dial(addr);
+            }
         }
     }
 
@@ -282,7 +283,7 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
             event = swarm.select_next_some() => {
                 match event {
                     SwarmEvent::ConnectionEstablished { peer_id, .. } => {
-                        if bootnode_str.contains(&peer_id.to_string()) {
+                        if boot_nodes.iter().any(|addr| addr.contains(&peer_id.to_string())) {
                             println!("🔗 Connected to Bootnode Relay! Enabling circuit listen...");
                             
                             let circuit_addr = format!("/p2p/{}/p2p-circuit", peer_id)
