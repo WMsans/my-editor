@@ -91,12 +91,14 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
     *state.local_peer_id.lock().unwrap_or_else(|e| e.into_inner()) = Some(local_peer_id.to_string());
     let _ = host.emit("local-peer-id", local_peer_id.to_string());
 
-    // --- FIX 1: Manually create Relay Client Transport ---
     let (relay_transport, relay_client) = relay::client::new(local_peer_id);
 
-    // --- FIX 2: Build Transport Stack manually ---
     let transport = {
-        let tcp_config = tcp::Config::default().nodelay(true);
+        // [FIXED] Removed .keepalive() as it caused compilation error. 
+        // We rely on app-level ping for keeping NAT alive.
+        let tcp_config = tcp::Config::default()
+            .nodelay(true);
+
         let tcp_transport = tcp::tokio::Transport::new(tcp_config);
         
         let dns_transport = libp2p::dns::tokio::Transport::system(tcp_transport)?;
@@ -140,7 +142,8 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
             };
             
             let autonat = autonat::Behaviour::new(key.public().to_peer_id(), autonat_config);
-            let ping = ping::Behaviour::new(ping::Config::new().with_interval(Duration::from_secs(20)));
+            // Lower ping interval to keep NAT mapping fresh
+            let ping = ping::Behaviour::new(ping::Config::new().with_interval(Duration::from_secs(15)));
 
             Ok(MyBehaviour {
                 relay_server,
@@ -163,22 +166,38 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
         swarm.add_external_address(external_addr);
     }
 
+    // --- CONNECTION LOGIC EXTRACTED ---
+    let boot_nodes_clone = boot_nodes.clone();
+    
+    // Initial Dial
     for bootnode in &boot_nodes { 
         if let Ok(addr) = bootnode.parse::<Multiaddr>() {
-            if !addr.to_string().contains(&local_peer_id.to_string()) {
-                let _ = swarm.dial(addr);
-            }
+            let _ = swarm.dial(addr);
         }
     }
 
     let mut current_host: Option<PeerId> = None;
     let mut heartbeat = tokio::time::interval(Duration::from_secs(3));
+    let mut check_relay_conn = tokio::time::interval(Duration::from_secs(10));
 
     loop {
         tokio::select! {
             _ = heartbeat.tick() => {
                 if let Some(host_id) = current_host {
                     swarm.behaviour_mut().request_response.send_request(&host_id, AppRequest::Ping);
+                }
+            }
+
+            // --- RECONNECT LOOP ---
+            _ = check_relay_conn.tick() => {
+                let connected_peers = swarm.network_info().num_peers();
+                if connected_peers == 0 {
+                    println!("⚠ No peers connected. Attempting to reconnect to Bootnodes...");
+                    for bootnode in &boot_nodes_clone { 
+                        if let Ok(addr) = bootnode.parse::<Multiaddr>() {
+                             let _ = swarm.dial(addr);
+                        }
+                    }
                 }
             }
 
@@ -276,6 +295,7 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
             event = swarm.select_next_some() => {
                 match event {
                     SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+                        let _ = host.emit("peer-connected", peer_id.to_string());
                         if boot_nodes.iter().any(|addr| addr.contains(&peer_id.to_string())) {
                             println!("🔗 Connected to Bootnode Relay! Enabling circuit listen...");
                             
@@ -284,8 +304,6 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
                                 
                             if let Ok(addr) = circuit_addr {
                                 let _ = swarm.listen_on(addr);
-                                // [FIX] Manually emit the relay address so it is definitely 
-                                // shared with the frontend and written to .collab_meta.json
                                 host.emit("new-listen-addr", circuit_addr_str.clone());
                                 state.lan_addrs.lock().unwrap_or_else(|e| e.into_inner()).push(circuit_addr_str);
                             }
@@ -357,6 +375,7 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
                     },
                     SwarmEvent::ConnectionClosed { peer_id, .. } => {
                         println!("❌ Disconnected from: {}", peer_id);
+                        let _ = host.emit("peer-disconnected", peer_id.to_string());
                     },
                     SwarmEvent::OutgoingConnectionError { error, .. } => {
                         println!("🚨 Failed to connect to bootnode: {:?}", error);
