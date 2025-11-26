@@ -1,4 +1,3 @@
-// src-frontend/mod-engine/DocumentRegistry.ts
 import * as Y from "yjs";
 import { invoke } from "@tauri-apps/api/core";
 import { debounce } from "lodash-es";
@@ -12,11 +11,17 @@ interface DocEntry {
 class DocumentRegistry {
   private docs: Map<string, DocEntry> = new Map();
   private rootPath: string = "";
+  private isHost: boolean = true; // Default to true until told otherwise
 
   constructor() {}
 
   public setRootPath(path: string) {
     this.rootPath = path;
+  }
+
+  // [NEW] Allow App to update host status
+  public setIsHost(isHost: boolean) {
+    this.isHost = isHost;
   }
 
   private getAbsolutePath(relativePath: string): string {
@@ -54,6 +59,12 @@ class DocumentRegistry {
 
   // Helper to manually trigger a save (e.g. from the Save button)
   public async manualSave(relativePath: string) {
+    // [FIX] Guest should not save to disk locally
+    if (!this.isHost) {
+      console.warn("Guest cannot save to disk directly. Changes are synced to Host.");
+      return;
+    }
+
     const entry = this.docs.get(relativePath);
     if (entry) {
         const content = Y.encodeStateAsUpdate(entry.doc);
@@ -71,6 +82,9 @@ class DocumentRegistry {
 
   private attachSaveHandler(path: string, entry: DocEntry) {
     const debouncedSave = debounce(() => {
+        // [FIX] Only Host writes to disk
+        if (!this.isHost) return;
+
         const content = Y.encodeStateAsUpdate(entry.doc);
         const absolutePath = this.getAbsolutePath(path);
 
@@ -83,8 +97,14 @@ class DocumentRegistry {
     }, 1000);
 
     entry.doc.on('update', (update, origin) => {
-        if (origin !== 'p2p') {
+        // [FIX] Host saves EVERYTHING (P2P updates included) to ensure Git push is accurate.
+        // Guest saves NOTHING to ensure Git pull is clean.
+        if (this.isHost) {
             debouncedSave();
+        }
+
+        // Only broadcast local user changes
+        if (origin !== 'p2p') {
             this.broadcastUpdate(path, update)
         }
     });

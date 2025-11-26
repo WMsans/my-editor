@@ -60,6 +60,10 @@ function App() {
   const isHostRef = useRef(isHost);
   useEffect(() => { isHostRef.current = isHost; }, [isHost]);
 
+  useEffect(() => {
+    documentRegistry.setIsHost(isHost);
+  }, [isHost]);
+
   // Create a ref for connectedPeers to access it in the closure of useAppLifecycle
   const connectedPeersRef = useRef(connectedPeers);
   useEffect(() => { connectedPeersRef.current = connectedPeers; }, [connectedPeers]);
@@ -111,6 +115,12 @@ function App() {
   const handleSave = async () => {
     if (!rootPath) {
         setWarningMsg("Cannot save: No project folder opened.");
+        return;
+    }
+
+    // [FIX] Block Guest from saving to disk directly
+    if (!isHost) {
+        setWarningMsg("Guests cannot save or create files on disk directly. Your changes are synced to the Host automatically.");
         return;
     }
 
