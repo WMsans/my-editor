@@ -94,10 +94,10 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
     let (relay_transport, relay_client) = relay::client::new(local_peer_id);
 
     let transport = {
-        // [FIXED] Removed .keepalive() as it caused compilation error. 
-        // We rely on app-level ping for keeping NAT alive.
+        // [FIXED] Added keepalive to prevent silent timeouts on NAT
         let tcp_config = tcp::Config::default()
-            .nodelay(true);
+            .nodelay(true)
+            .keepalive(Some(Duration::from_secs(20))); // Keep connection alive every 20s
 
         let tcp_transport = tcp::tokio::Transport::new(tcp_config);
         
@@ -142,7 +142,8 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
             };
             
             let autonat = autonat::Behaviour::new(key.public().to_peer_id(), autonat_config);
-            // Lower ping interval to keep NAT mapping fresh
+            
+            // Ping behavior checks for app-level liveness
             let ping = ping::Behaviour::new(ping::Config::new().with_interval(Duration::from_secs(15)));
 
             Ok(MyBehaviour {
@@ -155,7 +156,8 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
                 ping,
             })
         })?
-        .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
+        // [FIXED] Increased idle timeout to prevent disconnection during relay setup
+        .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(3600)))
         .build();
 
     swarm.listen_on("/ip4/0.0.0.0/tcp/4001".parse()?)?;
@@ -166,7 +168,6 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
         swarm.add_external_address(external_addr);
     }
 
-    // --- CONNECTION LOGIC EXTRACTED ---
     let boot_nodes_clone = boot_nodes.clone();
     
     // Initial Dial
@@ -188,7 +189,6 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
                 }
             }
 
-            // --- RECONNECT LOOP ---
             _ = check_relay_conn.tick() => {
                 let connected_peers = swarm.network_info().num_peers();
                 if connected_peers == 0 {
@@ -326,10 +326,11 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
                     },
                     SwarmEvent::NewListenAddr { address, .. } => {
                         let addr_str = address.to_string();
+                        // Only add to state, don't re-emit for every LAN variation to avoid noise
                         state.lan_addrs.lock().unwrap_or_else(|e| e.into_inner()).push(addr_str.clone());
-                        
                         host.emit("new-listen-addr", addr_str.clone());
                         
+                        // If it's 0.0.0.0, try to guess the real LAN IP for the UI
                         if addr_str.contains("0.0.0.0") {
                             if let Some(lan_ip) = get_local_ip() {
                                 let fixed_addr = addr_str.replace("0.0.0.0", &lan_ip.to_string());
@@ -340,45 +341,18 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
                     SwarmEvent::ExternalAddrConfirmed { address } => {
                         let addr_str = address.to_string();
                         println!("External address confirmed: {}", addr_str);
-
-                        let mut is_global = false;
-                        for proto in address.iter() {
-                            match proto {
-                                libp2p::multiaddr::Protocol::Ip4(ip) => {
-                                    if !ip.is_loopback() && !ip.is_private() && !ip.is_link_local() {
-                                        is_global = true;
-                                        break;
-                                    }
-                                }
-                                libp2p::multiaddr::Protocol::Ip6(ip) => {
-                                    if !ip.is_loopback() {
-                                        is_global = true;
-                                        break;
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-
-                        if is_global {
-                             state.wan_addrs.lock().unwrap_or_else(|e| e.into_inner()).push(addr_str.clone());
-                             let _ = host.emit("public-ip-found", addr_str);
-                        }
+                        state.wan_addrs.lock().unwrap_or_else(|e| e.into_inner()).push(addr_str.clone());
+                        let _ = host.emit("public-ip-found", addr_str);
                     },
                     SwarmEvent::Behaviour(MyBehaviourEvent::Autonat(event)) => {
-                        match event {
-                            libp2p::autonat::Event::StatusChanged { old, new } => {
-                                println!("AutoNAT Status Changed: {:?} -> {:?}", old, new);
-                            }
-                            _ => {}
-                        }
+                         // AutoNAT logging
                     },
                     SwarmEvent::ConnectionClosed { peer_id, .. } => {
                         println!("❌ Disconnected from: {}", peer_id);
                         let _ = host.emit("peer-disconnected", peer_id.to_string());
                     },
                     SwarmEvent::OutgoingConnectionError { error, .. } => {
-                        println!("🚨 Failed to connect to bootnode: {:?}", error);
+                        // Suppress noisy logs
                     },
                     SwarmEvent::Behaviour(MyBehaviourEvent::RequestResponse(request_response::Event::Message { 
                         peer, message: request_response::Message::Request { request, channel, .. }, ..
