@@ -3,7 +3,6 @@ mod state;
 mod network;
 mod commands;
 
-use tauri::{Manager, State};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use crate::state::PeerState;
@@ -17,6 +16,7 @@ pub fn run() {
     let tx = Arc::new(Mutex::new(tx));
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(peer_state.clone()) 
         .manage(tx.clone())
@@ -32,7 +32,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::get_peers,
             commands::request_join,
             commands::approve_join,
             commands::broadcast_update,
@@ -46,7 +45,10 @@ pub fn run() {
             commands::save_incoming_project,
             commands::request_file_sync,
             // NEW: Register new command
-            commands::broadcast_file_content
+            commands::broadcast_file_content,
+            commands::get_local_peer_id,
+            commands::git_pull,
+            commands::get_local_addrs
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

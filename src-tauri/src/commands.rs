@@ -6,10 +6,12 @@ use crate::state::PeerState;
 use std::fs;
 use std::path::Path;
 use serde::Serialize;
-use git2::{Repository, Signature, IndexAddOption, Cred, RemoteCallbacks, PushOptions};
+use git2::{Repository}; 
+use std::process::Command; 
 
 type SenderState<'a> = State<'a, Arc<Mutex<tokio::sync::mpsc::Sender<(String, Payload)>>>>;
 
+// ... [Keep FileEntry struct and visit_dirs function unchanged] ...
 #[derive(Serialize, Clone)]
 pub struct FileEntry {
     name: String,
@@ -46,18 +48,42 @@ fn visit_dirs(dir: &Path, base: &Path, cb: &mut Vec<FileSyncEntry>) -> std::io::
 }
 
 #[command]
-pub fn get_peers(state: State<'_, PeerState>) -> Result<Vec<String>, String> {
-    let peers = state.peers.lock().map_err(|e| e.to_string())?;
-    Ok(peers.iter().cloned().collect())
+pub fn get_local_peer_id(state: State<'_, PeerState>) -> Result<String, String> {
+    state.local_peer_id.lock().unwrap_or_else(|e| e.into_inner()).clone().ok_or("Peer ID not initialized".into())
+}
+
+#[command]
+pub fn git_pull(path: String, ssh_key_path: String) -> Result<String, String> {
+    let mut cmd = Command::new("git");
+    cmd.current_dir(&path);
+    cmd.arg("pull");
+    
+    if !ssh_key_path.trim().is_empty() {
+        #[cfg(target_os = "windows")]
+        let ssh_cmd = format!("ssh -i \"{}\"", ssh_key_path.replace("\\", "\\\\"));
+        #[cfg(not(target_os = "windows"))]
+        let ssh_cmd = format!("ssh -i \"{}\"", ssh_key_path);
+        cmd.env("GIT_SSH_COMMAND", ssh_cmd);
+    }
+    cmd.env("GIT_TERMINAL_PROMPT", "0");
+
+    let output = cmd.output().map_err(|e| format!("Git pull failed: {}", e))?;
+
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
 }
 
 #[command]
 pub async fn request_join(
     peer_id: String, 
+    remote_addrs: Vec<String>, // CHANGED: Accept list of addresses
     sender: SenderState<'_> 
 ) -> Result<(), String> {
     let tx = sender.lock().await;
-    tx.send(("join".to_string(), Payload::PeerId(peer_id))).await.map_err(|e| e.to_string())
+    tx.send(("join".to_string(), Payload::JoinCall { peer_id, remote_addrs })).await.map_err(|e| e.to_string())
 }
 
 #[command]
@@ -79,6 +105,7 @@ pub async fn approve_join(
     tx.send(("accept".to_string(), Payload::JoinAccept { peer_id, content })).await.map_err(|e| e.to_string())
 }
 
+// ... [Keep rest of the file unchanged] ...
 #[command]
 pub fn save_incoming_project(dest_path: String, data: Vec<u8>) -> Result<(), String> {
     let files: Vec<FileSyncEntry> = serde_json::from_slice(&data).map_err(|e| format!("Invalid project data: {}", e))?;
@@ -116,7 +143,6 @@ pub async fn request_file_sync(
     tx.send(("request_sync".to_string(), Payload::RequestSync { path })).await.map_err(|e| e.to_string())
 }
 
-// NEW: Command to send raw file content
 #[command]
 pub async fn broadcast_file_content(
     path: String,
@@ -138,7 +164,7 @@ pub fn read_directory(path: String) -> Result<Vec<FileEntry>, String> {
         let file_name = path.file_name().into_string().map_err(|_| "Invalid UTF-8".to_string())?;
         let file_path = path.path().to_string_lossy().to_string();
         
-        if file_name.starts_with('.') { continue; }
+        if file_name.starts_with('.') && file_name != ".collab_meta.json" { continue; } 
 
         entries.push(FileEntry {
             name: file_name,
@@ -159,8 +185,8 @@ pub fn read_directory(path: String) -> Result<Vec<FileEntry>, String> {
 }
 
 #[command]
-pub fn read_file_content(path: String) -> Result<String, String> {
-    fs::read_to_string(path).map_err(|e| e.to_string())
+pub fn read_file_content(path: String) -> Result<Vec<u8>, String> {
+    fs::read(path).map_err(|e| e.to_string())
 }
 
 #[command]
@@ -172,8 +198,12 @@ pub fn init_git_repo(path: String) -> Result<String, String> {
 }
 
 #[command]
-pub fn write_file_content(path: String, content: String) -> Result<(), String> {
-    fs::write(&path, content).map_err(|e| e.to_string())?;
+pub fn write_file_content(path: String, content: Vec<u8>) -> Result<(), String> {
+    if let Some(parent) = Path::new(&path).parent() {
+        fs::create_dir_all(parent).ok(); 
+    }
+    
+    fs::write(&path, &content).map_err(|e| e.to_string())?;
 
     if let Ok(repo) = Repository::discover(&path) {
         let path_obj = Path::new(&path);
@@ -210,16 +240,12 @@ pub fn set_remote_origin(path: String, url: String) -> Result<String, String> {
 
 #[command]
 pub fn push_changes(path: String, ssh_key_path: String) -> Result<String, String> {
-    // 1. Commit Staged Changes (Fixes "Still not pushing" issue)
-    // Files are staged on save (in write_file_content), but we must commit them before pushing.
-    let mut commit_cmd = std::process::Command::new("git");
+    let mut commit_cmd = Command::new("git");
     commit_cmd.current_dir(&path);
-    // Suppress output, allow empty message. If nothing to commit, this fails harmlessly.
-    commit_cmd.args(&["commit", "-m", "Auto-sync on quit"]);
+    commit_cmd.args(&["commit", "-m", "Auto-sync"]);
     let _ = commit_cmd.output();
 
-    // 2. Push Changes
-    let mut cmd = std::process::Command::new("git");
+    let mut cmd = Command::new("git");
     cmd.current_dir(&path);
     cmd.arg("push");
     
@@ -231,7 +257,6 @@ pub fn push_changes(path: String, ssh_key_path: String) -> Result<String, String
         cmd.env("GIT_SSH_COMMAND", ssh_cmd);
     }
 
-    // FIX: Fail immediately if git asks for a password (prevents hang)
     cmd.env("GIT_TERMINAL_PROMPT", "0");
 
     let output = cmd.output().map_err(|e| format!("Git command failed: {}", e))?;
@@ -241,4 +266,9 @@ pub fn push_changes(path: String, ssh_key_path: String) -> Result<String, String
     } else {
         Err(String::from_utf8_lossy(&output.stderr).to_string())
     }
+}
+
+#[command]
+pub fn get_local_addrs(state: State<'_, PeerState>) -> Result<Vec<String>, String> {
+    Ok(state.local_addrs.lock().unwrap_or_else(|e| e.into_inner()).clone())
 }

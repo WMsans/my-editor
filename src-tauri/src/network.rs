@@ -1,10 +1,12 @@
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager}; 
 use std::time::Duration;
+use std::fs; 
 use libp2p::{
-    mdns, noise, tcp, yamux,
-    swarm::{NetworkBehaviour, SwarmEvent},
-    SwarmBuilder, PeerId, StreamProtocol,
+    noise, tcp, yamux,
+    swarm::{NetworkBehaviour, SwarmEvent, dial_opts::DialOpts},
+    SwarmBuilder, PeerId, StreamProtocol, Multiaddr, 
     request_response::{self, ProtocolSupport},
+    identity, 
 };
 use tokio::sync::mpsc::Receiver;
 use futures::stream::StreamExt; 
@@ -13,9 +15,16 @@ use serde::Serialize;
 use crate::protocol::{AppRequest, AppResponse, Payload};
 use crate::state::PeerState;
 
+// NEW: Helper to find local LAN IP
+fn get_local_ip() -> Option<std::net::IpAddr> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    // We don't actually send data, just determining the route to a public IP
+    socket.connect("8.8.8.8:80").ok()?;
+    socket.local_addr().ok().map(|addr| addr.ip())
+}
+
 #[derive(NetworkBehaviour)]
 struct MyBehaviour {
-    mdns: mdns::tokio::Behaviour,
     request_response: request_response::json::Behaviour<AppRequest, AppResponse>,
 }
 
@@ -30,7 +39,6 @@ struct SyncRequestEvent {
     path: String,
 }
 
-// NEW: Event for raw file content
 #[derive(Serialize, Clone)]
 struct FileContentEvent {
     path: String,
@@ -43,19 +51,36 @@ pub async fn start_p2p_node(
     mut cmd_rx: Receiver<(String, Payload)>
 ) -> Result<(), Box<dyn std::error::Error>> {
     
-    let mut swarm = SwarmBuilder::with_new_identity()
+    let app_data_dir = app_handle.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    fs::create_dir_all(&app_data_dir)?;
+    let identity_path = app_data_dir.join("peer_identity");
+
+    let keypair = if identity_path.exists() {
+        let bytes = fs::read(&identity_path)?;
+        identity::Keypair::from_protobuf_encoding(&bytes)?
+    } else {
+        let key = identity::Keypair::generate_ed25519();
+        fs::write(&identity_path, key.to_protobuf_encoding()?)?;
+        key
+    };
+
+    let mut swarm = SwarmBuilder::with_existing_identity(keypair)
         .with_tokio()
         .with_tcp(tcp::Config::default(), noise::Config::new, yamux::Config::default)?
-        .with_behaviour(|key| {
-            let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id())?;
+        .with_behaviour(|_key| {
             let request_response = request_response::json::Behaviour::new(
                 [(StreamProtocol::new("/collab/1.0.0"), ProtocolSupport::Full)],
                 request_response::Config::default()
             );
-            Ok(MyBehaviour { mdns, request_response })
+            Ok(MyBehaviour { request_response })
         })?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
+
+    let local_peer_id = swarm.local_peer_id().to_string();
+    println!("Local Peer ID: {}", local_peer_id);
+    *state.local_peer_id.lock().unwrap_or_else(|e| e.into_inner()) = Some(local_peer_id.clone());
+    let _ = app_handle.emit("local-peer-id", local_peer_id);
 
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
 
@@ -72,8 +97,22 @@ pub async fn start_p2p_node(
 
             Some((cmd, payload)) = cmd_rx.recv() => {
                 match (cmd.as_str(), payload) {
-                    ("join", Payload::PeerId(peer_str)) => {
+                    ("join", Payload::JoinCall { peer_id: peer_str, remote_addrs }) => {
                         if let Ok(peer) = peer_str.parse::<PeerId>() {
+                             let mut multiaddrs = Vec::new();
+                             for addr_str in remote_addrs {
+                                 if let Ok(addr) = addr_str.parse::<Multiaddr>() {
+                                     multiaddrs.push(addr);
+                                 }
+                             }
+                             
+                             if !multiaddrs.is_empty() {
+                                 let opts = DialOpts::peer_id(peer)
+                                     .addresses(multiaddrs)
+                                     .build();
+                                 let _ = swarm.dial(opts);
+                             }
+
                             swarm.behaviour_mut().request_response.send_request(
                                 &peer, 
                                 AppRequest::Join { username: "Guest".into() }
@@ -81,9 +120,9 @@ pub async fn start_p2p_node(
                         }
                     },
                     ("accept", Payload::JoinAccept { peer_id, content }) => {
-                        let mut pending = state.pending_invites.lock().unwrap();
+                        let mut pending = state.pending_invites.lock().unwrap_or_else(|e| e.into_inner());
                         if let Some(channel) = pending.remove(&peer_id) {
-                             state.active_peers.lock().unwrap().insert(peer_id.clone());
+                             state.active_peers.lock().unwrap_or_else(|e| e.into_inner()).insert(peer_id.clone());
                              
                              let _ = swarm.behaviour_mut().request_response.send_response(
                                  channel,
@@ -92,7 +131,7 @@ pub async fn start_p2p_node(
                         }
                     },
                     ("sync", Payload::SyncData { path, data }) => {
-                        let targets: Vec<String> = state.active_peers.lock().unwrap().iter().cloned().collect();
+                        let targets: Vec<String> = state.active_peers.lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect();
                         
                         for peer_str in targets {
                             if let Ok(peer) = peer_str.parse::<PeerId>() {
@@ -110,7 +149,7 @@ pub async fn start_p2p_node(
                         }
                     },
                     ("request_sync", Payload::RequestSync { path }) => {
-                        let targets: Vec<String> = state.active_peers.lock().unwrap().iter().cloned().collect();
+                        let targets: Vec<String> = state.active_peers.lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect();
                          for peer_str in targets {
                             if let Ok(peer) = peer_str.parse::<PeerId>() {
                                 swarm.behaviour_mut().request_response.send_request(
@@ -126,9 +165,8 @@ pub async fn start_p2p_node(
                             );
                         }
                     },
-                    // NEW: Send File Content
                     ("file_content", Payload::FileContent { path, data }) => {
-                        let targets: Vec<String> = state.active_peers.lock().unwrap().iter().cloned().collect();
+                        let targets: Vec<String> = state.active_peers.lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect();
                         for peer_str in targets {
                             if let Ok(peer) = peer_str.parse::<PeerId>() {
                                 swarm.behaviour_mut().request_response.send_request(
@@ -150,26 +188,34 @@ pub async fn start_p2p_node(
             
             event = swarm.select_next_some() => {
                 match event {
-                    SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
-                        for (peer_id, _) in list {
-                            state.peers.lock().unwrap().insert(peer_id.to_string());
-                            let _ = app_handle.emit("peer-discovered", peer_id.to_string());
+                    SwarmEvent::NewListenAddr { address, .. } => {
+                        let addr_str = address.to_string();
+                        println!("Listening on {}", addr_str);
+                        
+                        // ADD THIS: Save raw address
+                        state.local_addrs.lock().unwrap_or_else(|e| e.into_inner()).push(addr_str.clone());
+                        
+                        let _ = app_handle.emit("new-listen-addr", addr_str.clone());
+                        
+                        if addr_str.contains("0.0.0.0") {
+                            if let Some(lan_ip) = get_local_ip() {
+                                let fixed_addr = addr_str.replace("0.0.0.0", &lan_ip.to_string());
+                                println!("Announcing LAN Addr: {}", fixed_addr);
+                                
+                                // ADD THIS: Save LAN address
+                                state.local_addrs.lock().unwrap_or_else(|e| e.into_inner()).push(fixed_addr.clone());
+                                
+                                let _ = app_handle.emit("new-listen-addr", fixed_addr);
+                            }
                         }
                     },
-                    SwarmEvent::Behaviour(MyBehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
-                        for (peer_id, _) in list {
-                            state.peers.lock().unwrap().remove(&peer_id.to_string());
-                            let _ = app_handle.emit("peer-expired", peer_id.to_string());
-                        }
-                    },
-
                     SwarmEvent::Behaviour(MyBehaviourEvent::RequestResponse(request_response::Event::Message { 
                         peer, message: request_response::Message::Request { request, channel, .. }, ..
                     })) => {
                         match request {
                             AppRequest::Join { username } => {
                                 println!("Join Request from {}: {}", peer, username);
-                                state.pending_invites.lock().unwrap().insert(peer.to_string(), channel);
+                                state.pending_invites.lock().unwrap_or_else(|e| e.into_inner()).insert(peer.to_string(), channel);
                                 let _ = app_handle.emit("join-requested", peer.to_string());
                             },
                             AppRequest::Sync { path, data } => {
@@ -180,7 +226,6 @@ pub async fn start_p2p_node(
                                 let _ = app_handle.emit("sync-requested", SyncRequestEvent { path });
                                 let _ = swarm.behaviour_mut().request_response.send_response(channel, AppResponse::Ack);
                             },
-                            // NEW: Handle File Content
                             AppRequest::FileContent { path, data } => {
                                 let _ = app_handle.emit("p2p-file-content", FileContentEvent { path, data });
                                 let _ = swarm.behaviour_mut().request_response.send_response(channel, AppResponse::Ack);
@@ -198,7 +243,7 @@ pub async fn start_p2p_node(
                                 if accepted {
                                     println!("Joined session with {}", peer);
                                     current_host = Some(peer); 
-                                    state.active_peers.lock().unwrap().insert(peer.to_string());
+                                    state.active_peers.lock().unwrap_or_else(|e| e.into_inner()).insert(peer.to_string());
                                     
                                     if let Some(c) = content {
                                         let _ = app_handle.emit("join-accepted", c);
@@ -215,7 +260,7 @@ pub async fn start_p2p_node(
                             current_host = None;
                             let _ = app_handle.emit("host-disconnected", peer.to_string());
                         }
-                        state.active_peers.lock().unwrap().remove(&peer.to_string());
+                        state.active_peers.lock().unwrap_or_else(|e| e.into_inner()).remove(&peer.to_string());
                     },
                     _ => {}
                 }

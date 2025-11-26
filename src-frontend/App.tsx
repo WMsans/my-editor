@@ -1,326 +1,165 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { EditorContent } from "@tiptap/react";
-import { BubbleMenu } from "@tiptap/react/menus" 
-import { useCollaborativeEditor } from "./hooks/useCollaborativeEditor";
+import * as Y from "yjs"; 
+import { invoke } from "@tauri-apps/api/core"; 
+import { documentRegistry } from "./mod-engine/DocumentRegistry"; 
+
+// Logic Hooks
 import { useP2P } from "./hooks/useP2P";
-import { PeerList } from "./components/PeerList";
-import { IncomingRequest } from "./components/IncomingRequest";
-import { FileExplorer } from "./components/FileExplorer";
+import { useHostNegotiation } from "./hooks/useHostNegotiation";
+import { useAppLifecycle } from "./hooks/useAppLifecycle";
+import { useProject } from "./hooks/useProject";
+import { useEditorManager } from "./hooks/useEditorManager";
+
+// Components
 import { MenuBar } from "./components/MenuBar";
 import { Settings } from "./components/Settings";
 import { WarningModal } from "./components/WarningModal";
-import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { SlashMenu } from "./components/SlashMenu"; 
+import { Sidebar } from "./components/Sidebar";
+import { EditorArea } from "./components/EditorArea";
 import "./App.css";
 
-// Helper to get relative path for P2P sync ID
-const getRelativePath = (root: string, file: string | null) => {
-  if (!root || !file) return null;
-  if (file.startsWith(root)) {
-    let rel = file.substring(root.length);
-    // Remove leading slashes/backslashes
-    if (rel.startsWith("/") || rel.startsWith("\\")) rel = rel.substring(1);
-    return rel;
-  }
-  return file; // Fallback
-};
-
 function App() {
-  // State for folder management
-  const [rootPath, setRootPath] = useState<string>("");
-  const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
-  const [fileSystemRefresh, setFileSystemRefresh] = useState(0);
-  
-  // Settings State
+  // --- UI State ---
   const [showSettings, setShowSettings] = useState(false);
-  const [sshKeyPath, setSshKeyPath] = useState(localStorage.getItem("sshKeyPath") || "");
-  const [detectedRemote, setDetectedRemote] = useState("");
-  
-  // Warning & Status State
   const [warningMsg, setWarningMsg] = useState<string | null>(null);
-  const [pendingQuit, setPendingQuit] = useState(false);
-  const [isPushing, setIsPushing] = useState(false); // New UI state
+  const deadHostIdRef = useRef<string | null>(null);
+
+  // --- Project & File System Hook ---
+  const {
+    rootPath, rootPathRef,
+    currentFilePath, setCurrentFilePath, currentFilePathRef,
+    fileSystemRefresh, setFileSystemRefresh,
+    sshKeyPath, setSshKeyPath, sshKeyPathRef,
+    detectedRemote, refreshRemoteOrigin,
+    isAutoJoining,
+    handleOpenFolder, handleNewFile, handleProjectReceived,
+    getRelativePath
+  } = useProject(setWarningMsg);
+
+  // --- P2P Callbacks ---
+  const handleHostDisconnect = useCallback((hostId: string) => {
+      deadHostIdRef.current = hostId;
+  }, []);
   
-  // Sync State
-  const [isSyncing, setIsSyncing] = useState(false);
-  const syncReceivedRef = useRef(false); 
+  const setIsSyncingRef = useRef<(v: boolean) => void>(() => {});
 
-  // Calculate relative path for the current session ID
-  const relativeFilePath = getRelativePath(rootPath, currentFilePath);
-
-  // Pass the RELATIVE path to hooks so peers agree on ID
-  const { editor, ydoc } = useCollaborativeEditor(currentFilePath, relativeFilePath);
-
-  // Refs
-  const rootPathRef = useRef(rootPath);
-  const sshKeyPathRef = useRef(sshKeyPath);
-
-  useEffect(() => {
-    rootPathRef.current = rootPath;
-  }, [rootPath]);
-
-  useEffect(() => {
-    sshKeyPathRef.current = sshKeyPath;
-    localStorage.setItem("sshKeyPath", sshKeyPath);
-  }, [sshKeyPath]);
-
-  // Reset sync ref when file changes
-  useEffect(() => {
-    syncReceivedRef.current = false;
-  }, [currentFilePath]);
-
-  // Callback: Host reads a file from disk to serve to a guest
-  const getFileContent = useCallback(async (relativePath: string) => {
-     if (!rootPath) throw new Error("No root path open");
-     const sep = rootPath.includes("\\") ? "\\" : "/";
-     const absPath = `${rootPath}${sep}${relativePath}`;
-     return await invoke<string>("read_file_content", { path: absPath });
-  }, [rootPath]);
-
-  // Callback: Guest receives raw file content from Host
-  const onFileContentReceived = useCallback((data: number[]) => {
-      if (!editor) return;
-      try {
-          const content = new TextDecoder().decode(new Uint8Array(data));
-          try {
-            const jsonContent = JSON.parse(content);
-            if (jsonContent.type === 'doc' && Array.isArray(jsonContent.content)) {
-              editor.commands.setContent(jsonContent);
-            } else {
-              editor.commands.setContent(content, { contentType: 'markdown' });
-            }
-          } catch (e) {
-            editor.commands.setContent(content, { contentType: 'markdown' });
-          }
-          setIsSyncing(false);
-          syncReceivedRef.current = true; 
-      } catch (e) {
-          console.error("Failed to set content", e);
+  const handleFileSync = useCallback((syncedPath: string) => {
+      const currentRel = getRelativePath(currentFilePathRef.current);
+      if (currentRel === syncedPath) {
+          setIsSyncingRef.current(false);
       }
-  }, [editor]);
+  }, [getRelativePath]);
 
-  // Callback: Yjs Sync Received
-  const onSyncReceived = useCallback(() => {
-      setIsSyncing(false);
-      syncReceivedRef.current = true;
-  }, []);
-
-  // Define onProjectReceived logic
-  const handleProjectReceived = useCallback(async (data: number[]) => {
-    const destPath = prompt("You joined a session! Enter absolute path to clone the project folder:");
-    if (destPath) {
-      try {
-        await invoke("save_incoming_project", { destPath, data });
-        setRootPath(destPath);
-        setFileSystemRefresh(prev => prev + 1);
-        setDetectedRemote("");
-        alert(`Project cloned to ${destPath}`);
-      } catch (e) {
-        setWarningMsg("Failed to save incoming project: " + e);
-      }
-    } else {
-      setWarningMsg("Sync cancelled: No destination folder selected.");
-    }
-  }, []);
-
+  // --- P2P Hook ---
   const { 
-    peers, 
-    incomingRequest, 
-    isHost, 
-    status, 
-    sendJoinRequest, 
-    acceptRequest, 
-    rejectRequest,
+    myPeerId, incomingRequest, isHost, isJoining, status, setStatus,
+    sendJoinRequest, acceptRequest, rejectRequest, requestSync, myAddresses,
+    connectedPeers // <--- Destructure new state
+  } = useP2P(handleProjectReceived, handleHostDisconnect, handleFileSync);
+
+  const isHostRef = useRef(isHost);
+  useEffect(() => { isHostRef.current = isHost; }, [isHost]);
+
+  useEffect(() => {
+    documentRegistry.setIsHost(isHost);
+  }, [isHost]);
+
+  // Create a ref for connectedPeers to access it in the closure of useAppLifecycle
+  const connectedPeersRef = useRef(connectedPeers);
+  useEffect(() => { connectedPeersRef.current = connectedPeers; }, [connectedPeers]);
+
+  // --- Host Negotiation Hook ---
+  useHostNegotiation({
+    rootPath,
+    myPeerId,
+    myAddresses,
+    sshKeyPathRef,
+    isHost,
+    deadHostIdRef,
+    isAutoJoiningRef: isAutoJoining,
+    sendJoinRequest,
+    setStatus,
+    setWarningMsg
+  });
+
+  // --- App Lifecycle Hook ---
+  const { 
+    pendingQuit, setPendingQuit, isPushing, handleQuit, handleForceQuit 
+  } = useAppLifecycle({
+    rootPathRef,
+    sshKeyPathRef,
+    isHostRef,
+    setWarningMsg,
+    connectedPeersRef // <--- Pass the ref
+  });
+
+  // --- Editor Manager Hook ---
+  const { editor, isSyncing, setIsSyncing, currentDoc } = useEditorManager(
+    rootPath,
+    currentFilePath,
+    getRelativePath,
+    isHost,
+    isJoining,
     requestSync
-  } = useP2P(
-      ydoc, 
-      relativeFilePath, 
-      handleProjectReceived,
-      getFileContent, 
-      onFileContentReceived,
-      onSyncReceived 
   );
 
-  // -- File Content Loading Logic --
-  useEffect(() => {
-    if (currentFilePath && editor) {
-      const loadFromDisk = () => {
-          invoke<string>("read_file_content", { path: currentFilePath })
-            .then((content) => {
-              try {
-                const jsonContent = JSON.parse(content);
-                if (jsonContent.type === 'doc' && Array.isArray(jsonContent.content)) {
-                  editor.commands.setContent(jsonContent);
-                } else {
-                  editor.commands.setContent(content, { contentType: 'markdown' });
-                }
-              } catch (e) {
-                editor.commands.setContent(content, { contentType: 'markdown' });
-              }
-            })
-            .catch((e) => setWarningMsg("Error opening file: " + e));
-      };
+  useEffect(() => { setIsSyncingRef.current = setIsSyncing; }, [setIsSyncing]);
+  useEffect(() => { if (showSettings) refreshRemoteOrigin(); }, [showSettings, refreshRemoteOrigin]);
 
-      if (isHost) {
-          if (peers.length > 0 && relativeFilePath) {
-              setIsSyncing(true);
-              requestSync(relativeFilePath);
-              const timer = setTimeout(() => {
-                  if (!syncReceivedRef.current) {
-                      setIsSyncing(false);
-                      if (editor.getText().trim() === "") {
-                          loadFromDisk();
-                      }
-                  }
-              }, 250); 
-              return () => clearTimeout(timer);
-          } else {
-              loadFromDisk();
-          }
-      } else {
-          if (peers.length > 0 && relativeFilePath) {
-              setIsSyncing(true);
-              requestSync(relativeFilePath);
-          } else {
-              loadFromDisk();
-          }
-      }
-    }
-  }, [currentFilePath, editor, peers.length, relativeFilePath, isHost, ydoc]); 
-
-  // -- Auto-detect Remote Logic --
-  useEffect(() => {
-    if (showSettings && rootPath) {
-      invoke<string>("get_remote_origin", { path: rootPath })
-        .then(setDetectedRemote)
-        .catch(() => setDetectedRemote(""));
-    }
-  }, [showSettings, rootPath]);
-
-  // -- Window Close Listener --
-  useEffect(() => {
-    const win = getCurrentWindow();
-    const unlisten = win.onCloseRequested(async (event) => {
-      const currentRoot = rootPathRef.current;
-      const currentSsh = sshKeyPathRef.current;
-
-      if (currentRoot && !pendingQuit) {
-        event.preventDefault(); 
-        
-        // UI Feedback: Show user we are working
-        setIsPushing(true);
-        console.log("Window close requested. Attempting push...");
-
-        try {
-          // NOTE: sshKeyPath is passed even if empty (safe for agent usage)
-          await invoke("push_changes", { path: currentRoot, sshKeyPath: currentSsh || "" });
-          await win.destroy();
-        } catch (e: any) {
-          setIsPushing(false);
-          setWarningMsg(`Failed to push changes before quitting:\n\n${e}\n\nQuit anyway?`);
-          setPendingQuit(true);
-        }
-      } else if (pendingQuit) {
-         event.preventDefault();
-      }
-    });
-
-    return () => { unlisten.then(f => f()); };
-  }, [pendingQuit]);
-
-  // -- Logic --
-
-  const pushChanges = async (path: string) => {
-    try {
-      await invoke<string>("push_changes", { path, sshKeyPath: sshKeyPath || "" });
-    } catch (e: any) {
-      setWarningMsg(`Push failed: ${e}`);
-      throw e; 
-    }
-  };
-
-  const handleOpenFolder = async () => {
-    if (rootPath) {
-      try { await pushChanges(rootPath); } catch (e) { return; }
-    }
-
-    const path = prompt("Enter absolute folder path to open:");
-    if (path) {
-      setRootPath(path);
-      setFileSystemRefresh(prev => prev + 1);
-      setDetectedRemote("");
-
-      try {
-        await invoke<string>("init_git_repo", { path });
-        const remote = await invoke<string>("get_remote_origin", { path });
-        setDetectedRemote(remote);
-      } catch (e) {
-        console.log("Git Init/Check status:", e);
-      }
-    }
-  };
-
-  const handleQuit = async () => {
-    const win = getCurrentWindow();
-    await win.close();
-  };
-
-  const handleForceQuit = async () => {
-    await getCurrentWindow().destroy();
-  };
-
-  const handleOpenFile = (path: string) => {
-    setCurrentFilePath(path);
-  };
-
-  const handleNewFile = () => {
-    setCurrentFilePath(null);
+  const onNewFileClick = () => {
+    handleNewFile();
     editor?.commands.clearContent();
   };
 
+  // --- Handle Save Logic ---
   const handleSave = async () => {
-    if (!currentFilePath) {
-      handleSaveAs();
-      return;
+    if (!rootPath) {
+        setWarningMsg("Cannot save: No project folder opened.");
+        return;
     }
-    await saveToDisk(currentFilePath);
-  };
 
-  const handleSaveAs = async () => {
-    const defaultName = currentFilePath || (rootPath ? `${rootPath}/untitled.json` : "untitled.json");
-    const path = prompt("Enter full path to save file:", defaultName);
-    if (path) {
-      await saveToDisk(path);
-      setCurrentFilePath(path);
+    // [FIX] Block Guest from saving to disk directly
+    if (!isHost) {
+        setWarningMsg("Guests cannot save or create files on disk directly. Your changes are synced to the Host automatically.");
+        return;
     }
-  };
 
-  const saveToDisk = async (path: string) => {
     try {
-      if (!editor) return;
-      let content = "";
-      if (path.endsWith(".json")) {
-        content = JSON.stringify(editor.getJSON(), null, 2);
-      } else {
-         content = editor.getText(); 
-      }
-      await invoke("write_file_content", { path, content });
-      setFileSystemRefresh(prev => prev + 1);
-    } catch (e) {
-      setWarningMsg("Error saving: " + e);
+        if (currentFilePath) {
+            const relPath = getRelativePath(currentFilePath);
+            if (relPath) {
+                await documentRegistry.manualSave(relPath);
+            }
+        } else {
+            const name = prompt("Enter file name (e.g., page.md):");
+            if (!name) return;
+
+            const sep = rootPath.includes("\\") ? "\\" : "/";
+            const newPath = `${rootPath}${sep}${name}`;
+            
+            const content = Y.encodeStateAsUpdate(currentDoc);
+
+            await invoke("write_file_content", { 
+                path: newPath, 
+                content: Array.from(content) 
+            });
+
+            setFileSystemRefresh(prev => prev + 1);
+            setCurrentFilePath(newPath);
+        }
+    } catch (e: any) {
+        setWarningMsg(`Failed to save file: ${e.toString()}`);
     }
   };
 
   return (
     <div className="app-layout">
       <MenuBar 
-        onNew={handleNewFile}
+        onNew={onNewFileClick}
         onOpenFolder={handleOpenFolder}
-        onSave={handleSave}
-        onSaveAs={handleSaveAs}
         onSettings={() => setShowSettings(true)}
         onQuit={handleQuit}
+        onSave={handleSave}
         currentFile={currentFilePath}
       />
       
@@ -341,59 +180,23 @@ function App() {
       />
 
       <div className="main-workspace">
-        {/* Sync/Push Overlay */}
-        {(isSyncing || isPushing) && (
-          <div style={{
-            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-            background: 'rgba(30, 30, 46, 0.8)', color: '#cdd6f4', 
-            zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexDirection: 'column'
-          }}>
-            <div style={{ fontSize: '1.2rem', marginBottom: '10px' }}>
-              {isPushing ? "Pushing changes to remote..." : "Syncing content..."}
-            </div>
-            {isPushing && <small>Please wait, do not close.</small>}
-          </div>
-        )}
+        <Sidebar 
+          rootPath={rootPath}
+          onOpenFile={setCurrentFilePath}
+          fileSystemRefresh={fileSystemRefresh}
+          isHost={isHost}
+          status={status}
+          incomingRequest={incomingRequest}
+          onAcceptRequest={() => acceptRequest(rootPath)}
+          onRejectRequest={rejectRequest}
+        />
 
-        <aside className="sidebar">
-           <FileExplorer 
-             rootPath={rootPath} 
-             onOpenFile={handleOpenFile} 
-             refreshTrigger={fileSystemRefresh} 
-           />
-           
-           <div className="p2p-panel">
-              <h3>P2P Status: {isHost ? "Host" : "Guest"}</h3>
-              <p className="status-text">{status}</p>
-              <PeerList peers={peers} onJoin={sendJoinRequest} />
-              {incomingRequest && (
-                <IncomingRequest 
-                  peerId={incomingRequest} 
-                  onAccept={() => acceptRequest(rootPath)} 
-                  onReject={rejectRequest} 
-                />
-              )}
-           </div>
-        </aside>
-
-        <main className="editor-container">
-          <div className="editor-scroll-area">
-             {editor && <SlashMenu editor={editor} />}
-
-            {editor && (
-              <BubbleMenu 
-                className="bubble-menu" 
-                editor={editor}
-              >
-                <button onClick={() => editor.chain().focus().toggleBold().run()} className={editor.isActive('bold') ? 'is-active' : ''}>Bold</button>
-                <button onClick={() => editor.chain().focus().toggleItalic().run()} className={editor.isActive('italic') ? 'is-active' : ''}>Italic</button>
-                <button onClick={() => editor.chain().focus().toggleCode().run()} className={editor.isActive('code') ? 'is-active' : ''}>Code</button>
-              </BubbleMenu>
-            )}
-            <EditorContent editor={editor} />
-          </div>
-        </main>
+        <EditorArea 
+          editor={editor}
+          isJoining={isJoining}
+          isPushing={isPushing}
+          isSyncing={isSyncing}
+        />
       </div>
     </div>
   );

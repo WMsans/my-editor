@@ -1,22 +1,21 @@
+// src-frontend/components/MenuBar.tsx
 import React, { useState } from "react";
 
 interface MenuBarProps {
   onNew: () => void;
   onOpenFolder: () => void;
-  onSave: () => void;
-  onSaveAs: () => void;
   onSettings: () => void;
   onQuit: () => void;
+  onSave: () => void; // Added onSave prop
   currentFile: string | null;
 }
 
 export const MenuBar: React.FC<MenuBarProps> = ({ 
   onNew, 
   onOpenFolder, 
-  onSave, 
-  onSaveAs, 
   onSettings,
   onQuit,
+  onSave,
   currentFile 
 }) => {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
@@ -41,8 +40,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             <div className="separator" />
             <div onClick={() => { onOpenFolder(); setActiveMenu(null); }}>Open Folder...</div>
             <div className="separator" />
-            <div onClick={() => { onSave(); setActiveMenu(null); }}>Save</div>
-            <div onClick={() => { onSaveAs(); setActiveMenu(null); }}>Save As...</div>
+            <div onClick={() => { onSave(); setActiveMenu(null); }}>Save</div> {/* Added Save Item */}
             <div className="separator" />
             <div onClick={() => { onSettings(); setActiveMenu(null); }}>Settings</div>
             <div className="separator" />
@@ -51,7 +49,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
         )}
       </div>
       <div className="current-file-label">
-        {currentFile ? `Editing: ${currentFile}` : "Untitled"}
+        {currentFile ? `Editing: ${currentFile}` : "Untitled (Unsaved)"}
       </div>
     </div>
   );
