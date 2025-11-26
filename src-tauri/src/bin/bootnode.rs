@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use tokio::sync::mpsc;
+use std::env;
 // Import your library modules
 use my_editor_lib::network::{self, PeerHost}; // Replace 'my_project_name' with your actual crate name from Cargo.toml
 use my_editor_lib::state::PeerState;
@@ -28,16 +29,22 @@ impl PeerHost for HeadlessHost {
 async fn main() {
     println!("Starting Headless P2P Bootnode...");
 
+    // READ PUBLIC IP FROM ENV
+    let public_ip = env::var("BOOTNODE_IP").ok();
+    
+    if let Some(ref ip) = public_ip {
+        println!("Configured with Public IP: {}", ip);
+    } else {
+        println!("⚠️ NO PUBLIC IP DETECTED. AutoNAT/Hole Punching may fail.");
+    }
+
     let state = PeerState::new();
     let (tx, rx) = mpsc::channel::<(String, Payload)>(32);
-    // We don't really use 'tx' on the server since there is no UI to send commands,
-    // but the network function requires it.
     let _tx = Arc::new(Mutex::new(tx));
-
     let host = HeadlessHost;
 
-    // Run the node!
-    if let Err(e) = network::start_p2p_node(host, state, rx).await {
+    // Pass public_ip to start_p2p_node
+    if let Err(e) = network::start_p2p_node(host, state, rx, public_ip).await {
         eprintln!("Node crashed: {}", e);
     }
 }

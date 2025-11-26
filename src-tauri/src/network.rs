@@ -2,7 +2,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use std::time::Duration;
 use std::fs; 
 use libp2p::{
-    autonat, identify, noise, ping, tcp, yamux,
+    autonat, identify, noise, ping, tcp, yamux, relay,
     swarm::{NetworkBehaviour, SwarmEvent, dial_opts::DialOpts},
     SwarmBuilder, PeerId, StreamProtocol, Multiaddr, 
     request_response::{self, ProtocolSupport},
@@ -38,6 +38,7 @@ fn get_local_ip() -> Option<std::net::IpAddr> {
 
 #[derive(NetworkBehaviour)]
 struct MyBehaviour {
+    relay: relay::Behaviour, // <--- ADD Relay Behaviour
     request_response: request_response::json::Behaviour<AppRequest, AppResponse>,
     identify: identify::Behaviour,
     autonat: autonat::Behaviour,
@@ -64,7 +65,8 @@ struct FileContentEvent {
 pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
     host: H, // Was: app_handle: AppHandle
     state: PeerState, 
-    mut cmd_rx: Receiver<(String, Payload)>
+    mut cmd_rx: Receiver<(String, Payload)>,
+    public_ip: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     
     let app_data_dir = host.get_app_data_dir();    
@@ -97,11 +99,20 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
                 key.public().clone(),
             ));
 
-            let autonat = autonat::Behaviour::new(key.public().to_peer_id(), Default::default());
-
+            let autonat_config = autonat::Config {
+                // If we provided a public IP, we force server mode confidence
+                ..Default::default()
+            };
+            let autonat = autonat::Behaviour::new(key.public().to_peer_id(), autonat_config);
             let ping = ping::Behaviour::new(ping::Config::new().with_interval(Duration::from_secs(20)));
+            
+            let relay = relay::Behaviour::new(
+                key.public().to_peer_id(),
+                relay::Config::default(),
+            );
 
             Ok(MyBehaviour {
+                relay,
                 request_response,
                 identify,
                 autonat,
@@ -118,7 +129,15 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
 
     swarm.listen_on("/ip4/0.0.0.0/tcp/4001".parse()?)?;
 
+    if let Some(ip) = public_ip {
+        let external_addr: Multiaddr = format!("/ip4/{}/tcp/4001", ip).parse()?;
+        println!("🌍 Announcing External Address: {}", external_addr);
+        swarm.add_external_address(external_addr);
+    }
+
     let bootnodes = [
+        // Replace this string with your GCP IP after deployment
+        "/ip4/35.212.216.37/tcp/4001/p2p/12D3KooWQcZw2N3bX3Cn8fhi118QASn2WJmhdLLFS6Y8pm4Tw72R",
         "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
         "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
         "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",

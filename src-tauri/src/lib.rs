@@ -25,7 +25,8 @@ pub fn run() {
             let state_for_thread = peer_state.clone(); 
             
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = network::start_p2p_node(handle, state_for_thread, rx).await {
+                // Pass None for public_ip on the desktop client
+                if let Err(e) = network::start_p2p_node(handle, state_for_thread, rx, None).await {
                     eprintln!("P2P Network Error: {e}");
                 }
             });
