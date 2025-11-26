@@ -8,6 +8,7 @@ use std::path::Path;
 use serde::Serialize;
 use git2::{Repository}; 
 use std::process::Command; 
+use std::collections::HashSet;
 
 type SenderState<'a> = State<'a, Arc<Mutex<tokio::sync::mpsc::Sender<(String, Payload)>>>>;
 
@@ -270,5 +271,12 @@ pub fn push_changes(path: String, ssh_key_path: String) -> Result<String, String
 
 #[command]
 pub fn get_local_addrs(state: State<'_, PeerState>) -> Result<Vec<String>, String> {
-    Ok(state.local_addrs.lock().unwrap_or_else(|e| e.into_inner()).clone())
+    let lan_addrs = state.lan_addrs.lock().unwrap_or_else(|e| e.into_inner());
+    let wan_addrs = state.wan_addrs.lock().unwrap_or_else(|e| e.into_inner());
+
+    let mut combined_addrs: HashSet<String> = HashSet::new();
+    combined_addrs.extend(lan_addrs.iter().cloned());
+    combined_addrs.extend(wan_addrs.iter().cloned());
+
+    Ok(combined_addrs.into_iter().collect())
 }

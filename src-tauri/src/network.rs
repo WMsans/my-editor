@@ -2,7 +2,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use std::time::Duration;
 use std::fs; 
 use libp2p::{
-    noise, tcp, yamux,
+    autonat, identify, noise, ping, tcp, yamux,
     swarm::{NetworkBehaviour, SwarmEvent, dial_opts::DialOpts},
     SwarmBuilder, PeerId, StreamProtocol, Multiaddr, 
     request_response::{self, ProtocolSupport},
@@ -26,6 +26,9 @@ fn get_local_ip() -> Option<std::net::IpAddr> {
 #[derive(NetworkBehaviour)]
 struct MyBehaviour {
     request_response: request_response::json::Behaviour<AppRequest, AppResponse>,
+    identify: identify::Behaviour,
+    autonat: autonat::Behaviour,
+    ping: ping::Behaviour,
 }
 
 #[derive(Serialize, Clone)]
@@ -64,15 +67,33 @@ pub async fn start_p2p_node(
         key
     };
 
+    let tcp_config = tcp::Config::default();
+
     let mut swarm = SwarmBuilder::with_existing_identity(keypair)
         .with_tokio()
-        .with_tcp(tcp::Config::default(), noise::Config::new, yamux::Config::default)?
-        .with_behaviour(|_key| {
+        .with_tcp(tcp_config, noise::Config::new, yamux::Config::default)?
+        .with_dns()?
+        .with_behaviour(|key| {
             let request_response = request_response::json::Behaviour::new(
                 [(StreamProtocol::new("/collab/1.0.0"), ProtocolSupport::Full)],
                 request_response::Config::default()
             );
-            Ok(MyBehaviour { request_response })
+
+            let identify = identify::Behaviour::new(identify::Config::new(
+                "/collab/1.0.0".to_string(),
+                key.public().clone(),
+            ));
+
+            let autonat = autonat::Behaviour::new(key.public().to_peer_id(), Default::default());
+
+            let ping = ping::Behaviour::new(ping::Config::new().with_interval(Duration::from_secs(20)));
+
+            Ok(MyBehaviour {
+                request_response,
+                identify,
+                autonat,
+                ping,
+            })
         })?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
@@ -83,6 +104,18 @@ pub async fn start_p2p_node(
     let _ = app_handle.emit("local-peer-id", local_peer_id);
 
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
+
+    let bootnodes = [
+        "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
+        "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
+        "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
+    ];
+
+    for bootnode in bootnodes {
+        if let Ok(addr) = bootnode.parse::<Multiaddr>() {
+            let _ = swarm.dial(addr);
+        }
+    }
 
     let mut current_host: Option<PeerId> = None;
     let mut heartbeat = tokio::time::interval(Duration::from_secs(3));
@@ -190,10 +223,7 @@ pub async fn start_p2p_node(
                 match event {
                     SwarmEvent::NewListenAddr { address, .. } => {
                         let addr_str = address.to_string();
-                        println!("Listening on {}", addr_str);
-                        
-                        // ADD THIS: Save raw address
-                        state.local_addrs.lock().unwrap_or_else(|e| e.into_inner()).push(addr_str.clone());
+                        state.lan_addrs.lock().unwrap_or_else(|e| e.into_inner()).push(addr_str.clone());
                         
                         let _ = app_handle.emit("new-listen-addr", addr_str.clone());
                         
@@ -203,11 +233,62 @@ pub async fn start_p2p_node(
                                 println!("Announcing LAN Addr: {}", fixed_addr);
                                 
                                 // ADD THIS: Save LAN address
-                                state.local_addrs.lock().unwrap_or_else(|e| e.into_inner()).push(fixed_addr.clone());
+                                state.lan_addrs.lock().unwrap_or_else(|e| e.into_inner()).push(fixed_addr.clone());
                                 
                                 let _ = app_handle.emit("new-listen-addr", fixed_addr);
                             }
                         }
+                    },
+                    SwarmEvent::ExternalAddrConfirmed { address } => {
+                        let addr_str = address.to_string();
+                        println!("External address confirmed: {}", addr_str);
+
+                        let mut is_global = false;
+                        for proto in address.iter() {
+                            match proto {
+                                libp2p::multiaddr::Protocol::Ip4(ip) => {
+                                    if !ip.is_loopback() && !ip.is_private() && !ip.is_link_local() {
+                                        is_global = true;
+                                        break;
+                                    }
+                                }
+                                libp2p::multiaddr::Protocol::Ip6(ip) => {
+                                    if !ip.is_loopback() {
+                                        is_global = true;
+                                        break;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+
+                        if is_global {
+                             state.wan_addrs.lock().unwrap_or_else(|e| e.into_inner()).push(addr_str.clone());
+                             let _ = app_handle.emit("public-ip-found", addr_str);
+                        }
+                    },
+                    SwarmEvent::Behaviour(MyBehaviourEvent::Autonat(event)) => {
+                        match event {
+                            libp2p::autonat::Event::StatusChanged { old, new } => {
+                                println!("AutoNAT Status Changed: {:?} -> {:?}", old, new);
+                                // If 'new' is Private, NAT traversal failed.
+                            }
+                            libp2p::autonat::Event::InboundProbe(e) => {
+                                println!("AutoNAT Inbound Probe: {:?}", e);
+                            }
+                            libp2p::autonat::Event::OutboundProbe(e) => {
+                                println!("AutoNAT Outbound Probe: {:?}", e);
+                            }
+                        }
+                    },
+                    SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+                        println!("✅ Connected to bootnode/peer: {}", peer_id);
+                    },
+                    SwarmEvent::ConnectionClosed { peer_id, .. } => {
+                        println!("❌ Disconnected from: {}", peer_id);
+                    },
+                    SwarmEvent::OutgoingConnectionError { error, .. } => {
+                        println!("🚨 Failed to connect to bootnode: {:?}", error);
                     },
                     SwarmEvent::Behaviour(MyBehaviourEvent::RequestResponse(request_response::Event::Message { 
                         peer, message: request_response::Message::Request { request, channel, .. }, ..
