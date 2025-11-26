@@ -92,7 +92,6 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
     let _ = host.emit("local-peer-id", local_peer_id.to_string());
 
     // --- FIX 1: Manually create Relay Client Transport ---
-    // This prevents the "Relay Behaviour polled after channel closed" panic.
     let (relay_transport, relay_client) = relay::client::new(local_peer_id);
 
     // --- FIX 2: Build Transport Stack manually ---
@@ -100,10 +99,8 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
         let tcp_config = tcp::Config::default().nodelay(true);
         let tcp_transport = tcp::tokio::Transport::new(tcp_config);
         
-        // FIX 3: Use libp2p::dns::tokio::Transport instead of TokioDnsConfig
         let dns_transport = libp2p::dns::tokio::Transport::system(tcp_transport)?;
 
-        // Combine DNS/TCP with Relay Transport
         dns_transport.or_transport(relay_transport)
             .upgrade(upgrade::Version::V1)
             .authenticate(noise::Config::new(&keypair)?)
@@ -113,16 +110,14 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
 
     let mut swarm = SwarmBuilder::with_existing_identity(keypair)
         .with_tokio()
-        .with_other_transport(|_| transport)? // Use our custom transport
+        .with_other_transport(|_| transport)? 
         .with_dns()?
         .with_behaviour(|key| {
-            // Relay Server (For Bootnode)
             let relay_server = relay::Behaviour::new(
                 key.public().to_peer_id(),
                 relay::Config::default(),
             );
 
-            // DCUtR (Hole Punching)
             let dcutr = dcutr::Behaviour::new(key.public().to_peer_id());
 
             let request_response = request_response::json::Behaviour::new(
@@ -149,7 +144,7 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
 
             Ok(MyBehaviour {
                 relay_server,
-                relay_client, // IMPORTANT: Use the behaviour created with the transport
+                relay_client, 
                 dcutr,
                 request_response,
                 identify,
@@ -168,10 +163,8 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
         swarm.add_external_address(external_addr);
     }
 
-    // Replace with your actual Bootnode Address
     for bootnode in &boot_nodes { 
         if let Ok(addr) = bootnode.parse::<Multiaddr>() {
-            // Optional: Don't dial ourselves if we are the bootnode
             if !addr.to_string().contains(&local_peer_id.to_string()) {
                 let _ = swarm.dial(addr);
             }
@@ -286,11 +279,15 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
                         if boot_nodes.iter().any(|addr| addr.contains(&peer_id.to_string())) {
                             println!("🔗 Connected to Bootnode Relay! Enabling circuit listen...");
                             
-                            let circuit_addr = format!("/p2p/{}/p2p-circuit", peer_id)
-                                .parse::<Multiaddr>();
+                            let circuit_addr_str = format!("/p2p/{}/p2p-circuit", peer_id);
+                            let circuit_addr = circuit_addr_str.parse::<Multiaddr>();
                                 
                             if let Ok(addr) = circuit_addr {
                                 let _ = swarm.listen_on(addr);
+                                // [FIX] Manually emit the relay address so it is definitely 
+                                // shared with the frontend and written to .collab_meta.json
+                                host.emit("new-listen-addr", circuit_addr_str.clone());
+                                state.lan_addrs.lock().unwrap_or_else(|e| e.into_inner()).push(circuit_addr_str);
                             }
                         }
                     },
