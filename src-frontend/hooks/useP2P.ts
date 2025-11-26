@@ -15,6 +15,9 @@ export function useP2P(
   const [status, setStatus] = useState("Initializing...");
   const [isJoining, setIsJoining] = useState(false);
   const [myAddresses, setMyAddresses] = useState<string[]>([]);
+  
+  // Track connected peers to determine if we are alone
+  const [connectedPeers, setConnectedPeers] = useState(0);
 
   const isHostRef = useRef(isHost);
   useEffect(() => {
@@ -39,6 +42,14 @@ export function useP2P(
              return [...prev, e.payload];
          });
       }),
+      // --- Peer Tracking Listeners ---
+      listen("peer-connected", () => {
+        setConnectedPeers(n => n + 1);
+      }),
+      listen("peer-disconnected", () => {
+        setConnectedPeers(n => Math.max(0, n - 1));
+      }),
+      // -------------------------------
       listen<string>("join-requested", (e) => {
         setIncomingRequest(e.payload);
         setStatus(`Incoming request from ${e.payload.slice(0, 8)}...`);
@@ -127,6 +138,7 @@ export function useP2P(
     acceptRequest,
     rejectRequest,
     requestSync,
-    myAddresses 
+    myAddresses,
+    connectedPeers // Export this
   };
 }

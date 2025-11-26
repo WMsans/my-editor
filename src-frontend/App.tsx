@@ -1,8 +1,7 @@
-// src-frontend/App.tsx
 import { useState, useEffect, useRef, useCallback } from "react";
-import * as Y from "yjs"; // Import Yjs
-import { invoke } from "@tauri-apps/api/core"; // Import invoke
-import { documentRegistry } from "./mod-engine/DocumentRegistry"; // Import Registry
+import * as Y from "yjs"; 
+import { invoke } from "@tauri-apps/api/core"; 
+import { documentRegistry } from "./mod-engine/DocumentRegistry"; 
 
 // Logic Hooks
 import { useP2P } from "./hooks/useP2P";
@@ -54,11 +53,16 @@ function App() {
   // --- P2P Hook ---
   const { 
     myPeerId, incomingRequest, isHost, isJoining, status, setStatus,
-    sendJoinRequest, acceptRequest, rejectRequest, requestSync, myAddresses 
+    sendJoinRequest, acceptRequest, rejectRequest, requestSync, myAddresses,
+    connectedPeers // <--- Destructure new state
   } = useP2P(handleProjectReceived, handleHostDisconnect, handleFileSync);
 
   const isHostRef = useRef(isHost);
   useEffect(() => { isHostRef.current = isHost; }, [isHost]);
+
+  // Create a ref for connectedPeers to access it in the closure of useAppLifecycle
+  const connectedPeersRef = useRef(connectedPeers);
+  useEffect(() => { connectedPeersRef.current = connectedPeers; }, [connectedPeers]);
 
   // --- Host Negotiation Hook ---
   useHostNegotiation({
@@ -81,11 +85,11 @@ function App() {
     rootPathRef,
     sshKeyPathRef,
     isHostRef,
-    setWarningMsg
+    setWarningMsg,
+    connectedPeersRef // <--- Pass the ref
   });
 
   // --- Editor Manager Hook ---
-  // Now returns currentDoc
   const { editor, isSyncing, setIsSyncing, currentDoc } = useEditorManager(
     rootPath,
     currentFilePath,
@@ -112,31 +116,24 @@ function App() {
 
     try {
         if (currentFilePath) {
-            // Save existing file
             const relPath = getRelativePath(currentFilePath);
             if (relPath) {
                 await documentRegistry.manualSave(relPath);
-                // Optionally show a "Saved" toast here
             }
         } else {
-            // Save new file (Save As)
             const name = prompt("Enter file name (e.g., page.md):");
             if (!name) return;
 
             const sep = rootPath.includes("\\") ? "\\" : "/";
             const newPath = `${rootPath}${sep}${name}`;
             
-            // Encode the content of the current (untitled) document
             const content = Y.encodeStateAsUpdate(currentDoc);
 
-            // Write to disk
             await invoke("write_file_content", { 
                 path: newPath, 
                 content: Array.from(content) 
             });
 
-            // Update state to point to the new file
-            // Trigger refresh to show in sidebar
             setFileSystemRefresh(prev => prev + 1);
             setCurrentFilePath(newPath);
         }
@@ -152,7 +149,7 @@ function App() {
         onOpenFolder={handleOpenFolder}
         onSettings={() => setShowSettings(true)}
         onQuit={handleQuit}
-        onSave={handleSave} // Pass the save handler
+        onSave={handleSave}
         currentFile={currentFilePath}
       />
       
