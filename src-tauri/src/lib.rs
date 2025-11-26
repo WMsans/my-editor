@@ -16,6 +16,7 @@ pub fn run() {
     let tx = Arc::new(Mutex::new(tx));
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(peer_state.clone()) 
         .manage(tx.clone())

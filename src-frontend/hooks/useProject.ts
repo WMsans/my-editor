@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog"; 
 import { documentRegistry } from "../mod-engine/DocumentRegistry";
 
 export function useProject(setWarningMsg: (msg: string | null) => void) {
@@ -65,25 +66,30 @@ export function useProject(setWarningMsg: (msg: string | null) => void) {
       }
     }
 
-    setTimeout(async () => {
-      try {
-        const path = prompt("Enter absolute folder path to open:");
-        if (path) {
-          setRootPath(path);
-          setFileSystemRefresh(prev => prev + 1);
-          setDetectedRemote("");
-          try {
-            await invoke("init_git_repo", { path });
-            const remote = await invoke<string>("get_remote_origin", { path });
-            setDetectedRemote(remote);
-          } catch (e) {
-            console.log("Git Init/Check status:", e);
-          }
+    // 2. Replace setTimeout/prompt with native dialog
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "Open Project Folder"
+      });
+
+      // In Tauri v2, 'selected' is null if cancelled, or a string path
+      if (selected && typeof selected === 'string') {
+        setRootPath(selected);
+        setFileSystemRefresh(prev => prev + 1);
+        setDetectedRemote("");
+        try {
+          await invoke("init_git_repo", { path: selected });
+          const remote = await invoke<string>("get_remote_origin", { path: selected });
+          setDetectedRemote(remote);
+        } catch (e) {
+          console.log("Git Init/Check status:", e);
         }
-      } catch (e) {
-        setWarningMsg("Could not open folder prompt: " + e);
       }
-    }, 50);
+    } catch (e) {
+      setWarningMsg("Could not open folder dialog: " + e);
+    }
   };
 
   // Action: Handle Incoming Project (P2P)
