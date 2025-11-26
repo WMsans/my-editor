@@ -1,8 +1,8 @@
-use tauri::{AppHandle, Emitter, Manager}; 
+use tauri::{Manager}; 
 use std::time::Duration;
 use std::fs; 
 use libp2p::{
-    autonat, identify, noise, ping, tcp, yamux, relay,
+    autonat, identify, noise, ping, tcp, yamux, relay, dcutr,
     swarm::{NetworkBehaviour, SwarmEvent, dial_opts::DialOpts},
     SwarmBuilder, PeerId, StreamProtocol, Multiaddr, 
     request_response::{self, ProtocolSupport},
@@ -38,7 +38,13 @@ fn get_local_ip() -> Option<std::net::IpAddr> {
 
 #[derive(NetworkBehaviour)]
 struct MyBehaviour {
-    relay: relay::Behaviour, // <--- ADD Relay Behaviour
+    // Allows the Bootnode to act as a Relay Server for others
+    relay_server: relay::Behaviour,
+    // Allows the Client to USE the Bootnode as a relay
+    relay_client: relay::client::Behaviour,
+    // Enables automatic Hole Punching (DCUtR)
+    dcutr: dcutr::Behaviour,
+    
     request_response: request_response::json::Behaviour<AppRequest, AppResponse>,
     identify: identify::Behaviour,
     autonat: autonat::Behaviour,
@@ -86,9 +92,22 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
 
     let mut swarm = SwarmBuilder::with_existing_identity(keypair)
         .with_tokio()
-        .with_tcp(tcp_config, noise::Config::new, yamux::Config::default)?
+        .with_tcp(tcp::Config::default(), noise::Config::new, yamux::Config::default)?
+        .with_quic() // Optional: QUIC is often better for hole punching than TCP
         .with_dns()?
         .with_behaviour(|key| {
+            // 1. Relay Client (For the Desktop App)
+            let (relay_transport, relay_client) = relay::client::new(key.public().to_peer_id());
+
+            // 2. DCUtR (The Hole Punching Logic)
+            let dcutr = dcutr::Behaviour::new(key.public().to_peer_id());
+
+            // 3. Relay Server (For the Bootnode)
+            let relay_server = relay::Behaviour::new(
+                key.public().to_peer_id(),
+                relay::Config::default(), // Default allows reservations
+            );
+
             let request_response = request_response::json::Behaviour::new(
                 [(StreamProtocol::new("/collab/1.0.0"), ProtocolSupport::Full)],
                 request_response::Config::default()
@@ -99,20 +118,23 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
                 key.public().clone(),
             ));
 
-            let autonat_config = autonat::Config {
-                // If we provided a public IP, we force server mode confidence
-                ..Default::default()
+            // Force server mode if we have a public IP, otherwise let AutoNAT decide
+            let autonat_config = if public_ip.is_some() {
+                 autonat::Config {
+                    only_global_ips: false, 
+                    ..Default::default()
+                 }
+            } else {
+                autonat::Config::default()
             };
+            
             let autonat = autonat::Behaviour::new(key.public().to_peer_id(), autonat_config);
             let ping = ping::Behaviour::new(ping::Config::new().with_interval(Duration::from_secs(20)));
-            
-            let relay = relay::Behaviour::new(
-                key.public().to_peer_id(),
-                relay::Config::default(),
-            );
 
             Ok(MyBehaviour {
-                relay,
+                relay_server,
+                relay_client, // Add this
+                dcutr,        // Add this
                 request_response,
                 identify,
                 autonat,
@@ -135,12 +157,11 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
         swarm.add_external_address(external_addr);
     }
 
+    let bootnode_str = "/ip4/35.212.216.37/tcp/4001/p2p/12D3KooWQcZw2N3bX3Cn8fhi118QASn2WJmhdLLFS6Y8pm4Tw72R";
+
     let bootnodes = [
         // Replace this string with your GCP IP after deployment
-        "/ip4/35.212.216.37/tcp/4001/p2p/12D3KooWQcZw2N3bX3Cn8fhi118QASn2WJmhdLLFS6Y8pm4Tw72R",
-        "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
-        "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
-        "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
+        bootnode_str,
     ];
 
     for bootnode in bootnodes {
@@ -253,6 +274,38 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
             
             event = swarm.select_next_some() => {
                 match event {
+                    SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+                        // Check if the connected peer is our bootnode
+                        if bootnode_str.contains(&peer_id.to_string()) {
+                            println!("🔗 Connected to Bootnode Relay! Enabling circuit listen...");
+                            
+                            // Construct the circuit address: /p2p/<BOOTNODE_ID>/p2p-circuit
+                            // This tells the network "I am reachable VIA this bootnode"
+                            let circuit_addr = format!("/p2p/{}/p2p-circuit", peer_id)
+                                .parse::<Multiaddr>();
+                                
+                            if let Ok(addr) = circuit_addr {
+                                let _ = swarm.listen_on(addr);
+                            }
+                        }
+                    },
+                    // NEW: Log Relay Reservation status
+                    SwarmEvent::Behaviour(MyBehaviourEvent::RelayClient(
+                        relay::client::Event::ReservationReqAccepted { .. }
+                    )) => {
+                        println!("✅ Relay Reservation Accepted! We are now reachable via the Bootnode.");
+                    },
+                    // FIX: Replace the old dcutr match arms with this single struct match
+                    SwarmEvent::Behaviour(MyBehaviourEvent::Dcutr(dcutr::Event { remote_peer_id, result })) => {
+                        match result {
+                            Ok(_) => {
+                                println!("⚡⚡⚡ HOLE PUNCH SUCCESS! Direct connection to {} ⚡⚡⚡", remote_peer_id);
+                            }
+                            Err(e) => {
+                                println!("⚡ DCUtR Hole Punch failed for {}: {:?}", remote_peer_id, e);
+                            }
+                        }
+                    },
                     SwarmEvent::NewListenAddr { address, .. } => {
                         let addr_str = address.to_string();
                         state.lan_addrs.lock().unwrap_or_else(|e| e.into_inner()).push(addr_str.clone());
@@ -308,9 +361,7 @@ pub async fn start_p2p_node<H: PeerHost + Send + Sync + 'static>(
                             }
                         }
                     },
-                    SwarmEvent::ConnectionEstablished { peer_id, .. } => {
-                        println!("✅ Connected to bootnode/peer: {}", peer_id);
-                    },
+
                     SwarmEvent::ConnectionClosed { peer_id, .. } => {
                         println!("❌ Disconnected from: {}", peer_id);
                     },
