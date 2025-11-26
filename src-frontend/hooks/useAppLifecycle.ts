@@ -2,8 +2,6 @@ import { useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 
-const META_FILE = ".collab_meta.json";
-
 interface UseAppLifecycleProps {
   rootPathRef: React.MutableRefObject<string>;
   sshKeyPathRef: React.MutableRefObject<string>;
@@ -30,22 +28,14 @@ export function useAppLifecycle({
         event.preventDefault(); 
         setIsPushing(true);
         try {
-          // If we are host, clear the hostId in meta file before pushing
+          // If we are host, push changes only.
+          // We intentionally do NOT clear the hostId in meta file here.
+          // Clearing it creates a race condition/conflict with the guest 
+          // who is simultaneously writing their own ID to the same file.
           if (isHostRef.current) {
-             const sep = currentRoot.includes("\\") ? "\\": "/";
-             const metaPath = `${currentRoot}${sep}${META_FILE}`;
-             const content = new TextEncoder().encode(JSON.stringify({ hostId: "" }, null, 2));
-             try {
-                await invoke("write_file_content", { 
-                    path: metaPath, 
-                    content: Array.from(content)
-                });
-             } catch (e) {
-                console.error("Failed to clear host ID:", e);
-             }
+             await invoke("push_changes", { path: currentRoot, sshKeyPath: currentSsh || "" });
           }
 
-          await invoke("push_changes", { path: currentRoot, sshKeyPath: currentSsh || "" });
           await win.destroy();
         } catch (e: any) {
           setIsPushing(false);
