@@ -14,6 +14,7 @@ import { useEditorManager } from "./hooks/useEditorManager";
 import { MenuBar } from "./components/MenuBar";
 import { Settings } from "./components/Settings";
 import { WarningModal } from "./components/WarningModal";
+import { PasswordModal } from "./components/PasswordModal"; // [NEW]
 import { Sidebar } from "./components/Sidebar";
 import { EditorArea } from "./components/EditorArea";
 import "./App.css";
@@ -23,6 +24,21 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [warningMsg, setWarningMsg] = useState<string | null>(null);
   const deadHostIdRef = useRef<string | null>(null);
+
+  // --- Password Modal State ---
+  const [passwordRequest, setPasswordRequest] = useState<{
+    message: string;
+    resolve: (val: string | null) => void;
+  } | null>(null);
+
+  // --- Encryption State ---
+  const [encryptionKey, setEncryptionKey] = useState(localStorage.getItem("encryptionKey") || "");
+  const encryptionKeyRef = useRef(encryptionKey);
+  
+  useEffect(() => {
+    encryptionKeyRef.current = encryptionKey;
+    localStorage.setItem("encryptionKey", encryptionKey);
+  }, [encryptionKey]);
 
   // --- Project & File System Hook ---
   const {
@@ -54,7 +70,7 @@ function App() {
   const { 
     myPeerId, incomingRequest, isHost, isJoining, status, setStatus,
     sendJoinRequest, acceptRequest, rejectRequest, requestSync, myAddresses,
-    connectedPeers // <--- Destructure new state
+    connectedPeers
   } = useP2P(handleProjectReceived, handleHostDisconnect, handleFileSync);
 
   const isHostRef = useRef(isHost);
@@ -64,9 +80,29 @@ function App() {
     documentRegistry.setIsHost(isHost);
   }, [isHost]);
 
-  // Create a ref for connectedPeers to access it in the closure of useAppLifecycle
   const connectedPeersRef = useRef(connectedPeers);
   useEffect(() => { connectedPeersRef.current = connectedPeers; }, [connectedPeers]);
+
+  // --- Password Request Handler (Promisified) ---
+  const requestPassword = useCallback((message: string) => {
+    return new Promise<string | null>((resolve) => {
+      setPasswordRequest({ message, resolve });
+    });
+  }, []);
+
+  const handlePasswordSubmit = (password: string) => {
+    if (passwordRequest) {
+      passwordRequest.resolve(password);
+      setPasswordRequest(null);
+    }
+  };
+
+  const handlePasswordCancel = () => {
+    if (passwordRequest) {
+      passwordRequest.resolve(null);
+      setPasswordRequest(null);
+    }
+  };
 
   // --- Host Negotiation Hook ---
   useHostNegotiation({
@@ -74,12 +110,15 @@ function App() {
     myPeerId,
     myAddresses,
     sshKeyPathRef,
+    encryptionKeyRef,
+    setEncryptionKey,
     isHost,
     deadHostIdRef,
     isAutoJoiningRef: isAutoJoining,
     sendJoinRequest,
     setStatus,
-    setWarningMsg
+    setWarningMsg,
+    requestPassword // Pass the callback
   });
 
   // --- App Lifecycle Hook ---
@@ -90,7 +129,7 @@ function App() {
     sshKeyPathRef,
     isHostRef,
     setWarningMsg,
-    connectedPeersRef // <--- Pass the ref
+    connectedPeersRef
   });
 
   // --- Editor Manager Hook ---
@@ -111,19 +150,15 @@ function App() {
     editor?.commands.clearContent();
   };
 
-  // --- Handle Save Logic ---
   const handleSave = async () => {
     if (!rootPath) {
         setWarningMsg("Cannot save: No project folder opened.");
         return;
     }
-
-    // [FIX] Block Guest from saving to disk directly
     if (!isHost) {
         setWarningMsg("Guests cannot save or create files on disk directly. Your changes are synced to the Host automatically.");
         return;
     }
-
     try {
         if (currentFilePath) {
             const relPath = getRelativePath(currentFilePath);
@@ -133,17 +168,13 @@ function App() {
         } else {
             const name = prompt("Enter file name (e.g., page.md):");
             if (!name) return;
-
             const sep = rootPath.includes("\\") ? "\\" : "/";
             const newPath = `${rootPath}${sep}${name}`;
-            
             const content = Y.encodeStateAsUpdate(currentDoc);
-
             await invoke("write_file_content", { 
                 path: newPath, 
                 content: Array.from(content) 
             });
-
             setFileSystemRefresh(prev => prev + 1);
             setCurrentFilePath(newPath);
         }
@@ -168,7 +199,17 @@ function App() {
         onClose={() => setShowSettings(false)}
         sshKeyPath={sshKeyPath}
         setSshKeyPath={setSshKeyPath}
+        encryptionKey={encryptionKey}
+        setEncryptionKey={setEncryptionKey}
         detectedRemote={detectedRemote}
+      />
+
+      {/* New Password Modal */}
+      <PasswordModal 
+        isOpen={!!passwordRequest}
+        message={passwordRequest?.message || ""}
+        onSubmit={handlePasswordSubmit}
+        onCancel={handlePasswordCancel}
       />
 
       <WarningModal 

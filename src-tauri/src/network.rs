@@ -2,11 +2,19 @@ use tauri::{AppHandle, Emitter, Manager};
 use std::time::Duration;
 use std::fs; 
 use libp2p::{
-    noise, tcp, yamux,
     swarm::{NetworkBehaviour, SwarmEvent, dial_opts::DialOpts},
     SwarmBuilder, PeerId, StreamProtocol, Multiaddr, 
     request_response::{self, ProtocolSupport},
-    identity, 
+    identity,
+    relay::client as relay_client,
+    dcutr,
+    identify,
+    ping,
+    core::multiaddr::Protocol,
+    noise, // Required for relay transport upgrade
+    yamux, // Required for relay transport upgrade
+    core::upgrade::Version, // Required for upgrade version
+    Transport
 };
 use tokio::sync::mpsc::Receiver;
 use futures::stream::StreamExt; 
@@ -15,17 +23,22 @@ use serde::Serialize;
 use crate::protocol::{AppRequest, AppResponse, Payload};
 use crate::state::PeerState;
 
-// NEW: Helper to find local LAN IP
+// TODO: Ideally this should be configurable, but hardcoded for the demo/request context
+const RELAY_ADDRESS: &str = "/ip4/35.212.216.37/udp/4001/quic-v1/p2p/12D3KooWGty8e23SZbBJTTmyLQjj8joaWU4cqPou46Gp6oGVE6UM";
+
 fn get_local_ip() -> Option<std::net::IpAddr> {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
-    // We don't actually send data, just determining the route to a public IP
-    socket.connect("8.8.8.8:80").ok()?;
+    socket.connect("8.8.8.8:53").ok()?;
     socket.local_addr().ok().map(|addr| addr.ip())
 }
 
 #[derive(NetworkBehaviour)]
 struct MyBehaviour {
     request_response: request_response::json::Behaviour<AppRequest, AppResponse>,
+    relay_client: relay_client::Behaviour,
+    dcutr: dcutr::Behaviour,
+    identify: identify::Behaviour,
+    ping: ping::Behaviour,
 }
 
 #[derive(Serialize, Clone)]
@@ -64,28 +77,81 @@ pub async fn start_p2p_node(
         key
     };
 
+    let local_peer_id = PeerId::from(keypair.public());
+    println!("Local Peer ID: {}", local_peer_id);
+    *state.local_peer_id.lock().unwrap_or_else(|e| e.into_inner()) = Some(local_peer_id.to_string());
+    let _ = app_handle.emit("local-peer-id", local_peer_id.to_string());
+
+    // 1. Create Relay Client
+    let (relay_transport, relay_behaviour) = relay_client::new(local_peer_id);
+
+    // 2. Build Swarm
     let mut swarm = SwarmBuilder::with_existing_identity(keypair)
         .with_tokio()
-        .with_tcp(tcp::Config::default(), noise::Config::new, yamux::Config::default)?
-        .with_behaviour(|_key| {
+        .with_quic()
+        .with_other_transport(|key| {
+            let noise_config = noise::Config::new(key).expect("failed to create noise config");
+            let yamux_config = yamux::Config::default();
+
+            relay_transport
+                .upgrade(Version::V1)
+                .authenticate(noise_config)
+                .multiplex(yamux_config)
+        })? 
+        .with_dns()? 
+        .with_behaviour(|key| {
             let request_response = request_response::json::Behaviour::new(
                 [(StreamProtocol::new("/collab/1.0.0"), ProtocolSupport::Full)],
                 request_response::Config::default()
             );
-            Ok(MyBehaviour { request_response })
+            
+            let identify = identify::Behaviour::new(identify::Config::new(
+                "/collab/1.0.0".to_string(),
+                key.public(),
+            ));
+
+            Ok(MyBehaviour { 
+                request_response,
+                relay_client: relay_behaviour,
+                dcutr: dcutr::Behaviour::new(local_peer_id),
+                identify,
+                ping: ping::Behaviour::new(ping::Config::new()),
+            })
         })?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
 
-    let local_peer_id = swarm.local_peer_id().to_string();
-    println!("Local Peer ID: {}", local_peer_id);
-    *state.local_peer_id.lock().unwrap_or_else(|e| e.into_inner()) = Some(local_peer_id.clone());
-    let _ = app_handle.emit("local-peer-id", local_peer_id);
+    // 3. Listen on Local Interface
+    swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
 
-    swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
+    // 4. Bootstrap: Prepare Relay Logic
+    let mut relay_peer_id: Option<PeerId> = None;
+    let mut relay_addr_struct: Option<Multiaddr> = None;
+
+    if let Ok(relay_addr) = RELAY_ADDRESS.parse::<Multiaddr>() {
+        relay_addr_struct = Some(relay_addr.clone());
+        
+        // Extract the Relay PeerId so we know when we are connected
+        for protocol in relay_addr.iter() {
+            if let Protocol::P2p(id) = protocol {
+                relay_peer_id = Some(id);
+                break;
+            }
+        }
+
+        println!("Dialing Relay: {}", relay_addr);
+        swarm.dial(DialOpts::from(relay_addr))?;
+        // Note: We do NOT listen on the circuit yet. We wait for connection success.
+    } else {
+        eprintln!("WARNING: Invalid RELAY_ADDRESS.");
+    }
 
     let mut current_host: Option<PeerId> = None;
     let mut heartbeat = tokio::time::interval(Duration::from_secs(3));
+    let mut relay_circuit_listening = false;
+    
+    // [FIX] State to track pending join request
+    let mut pending_join_host: Option<PeerId> = None;
 
     loop {
         tokio::select! {
@@ -99,40 +165,55 @@ pub async fn start_p2p_node(
                 match (cmd.as_str(), payload) {
                     ("join", Payload::JoinCall { peer_id: peer_str, remote_addrs }) => {
                         if let Ok(peer) = peer_str.parse::<PeerId>() {
-                             let mut multiaddrs = Vec::new();
-                             for addr_str in remote_addrs {
-                                 if let Ok(addr) = addr_str.parse::<Multiaddr>() {
-                                     multiaddrs.push(addr);
-                                 }
-                             }
-                             
-                             if !multiaddrs.is_empty() {
-                                 let opts = DialOpts::peer_id(peer)
-                                     .addresses(multiaddrs)
-                                     .build();
-                                 let _ = swarm.dial(opts);
-                             }
-
-                            swarm.behaviour_mut().request_response.send_request(
-                                &peer, 
-                                AppRequest::Join { username: "Guest".into() }
-                            );
+                            let mut multiaddrs = Vec::new();
+                            
+                            for addr_str in remote_addrs {
+                                if let Ok(addr) = addr_str.parse::<Multiaddr>() {
+                                    multiaddrs.push(addr);
+                                }
+                            }
+                            
+                            // Add Relay Circuit Address manually if configured
+                            if let Ok(relay_addr) = RELAY_ADDRESS.parse::<Multiaddr>() {
+                                let circuit_addr = relay_addr
+                                    .with(Protocol::P2pCircuit)
+                                    .with(Protocol::P2p(peer));
+                                
+                                println!("(Join) Adding Relay Circuit Address: {}", circuit_addr);
+                                multiaddrs.push(circuit_addr);
+                            }
+                            
+                            let opts = DialOpts::peer_id(peer)
+                                .addresses(multiaddrs)
+                                .build();
+                            
+                            // [FIX] Dial first, send request only after connection logic below
+                            let _ = swarm.dial(opts);
+                            
+                            if swarm.is_connected(&peer) {
+                                println!("Already connected to {}. Sending Join Request immediately.", peer);
+                                swarm.behaviour_mut().request_response.send_request(
+                                    &peer, 
+                                    AppRequest::Join { username: "Guest".into() }
+                                );
+                            } else {
+                                println!("Dialing {}. Request queued until connection established.", peer);
+                                pending_join_host = Some(peer);
+                            }
                         }
                     },
                     ("accept", Payload::JoinAccept { peer_id, content }) => {
                         let mut pending = state.pending_invites.lock().unwrap_or_else(|e| e.into_inner());
                         if let Some(channel) = pending.remove(&peer_id) {
-                             state.active_peers.lock().unwrap_or_else(|e| e.into_inner()).insert(peer_id.clone());
-                             
-                             let _ = swarm.behaviour_mut().request_response.send_response(
-                                 channel,
-                                 AppResponse::Join { accepted: true, content: Some(content) }
-                             );
+                            state.active_peers.lock().unwrap_or_else(|e| e.into_inner()).insert(peer_id.clone());
+                            let _ = swarm.behaviour_mut().request_response.send_response(
+                                channel,
+                                AppResponse::Join { accepted: true, content: Some(content) }
+                            );
                         }
                     },
                     ("sync", Payload::SyncData { path, data }) => {
                         let targets: Vec<String> = state.active_peers.lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect();
-                        
                         for peer_str in targets {
                             if let Ok(peer) = peer_str.parse::<PeerId>() {
                                 swarm.behaviour_mut().request_response.send_request(
@@ -150,7 +231,7 @@ pub async fn start_p2p_node(
                     },
                     ("request_sync", Payload::RequestSync { path }) => {
                         let targets: Vec<String> = state.active_peers.lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect();
-                         for peer_str in targets {
+                        for peer_str in targets {
                             if let Ok(peer) = peer_str.parse::<PeerId>() {
                                 swarm.behaviour_mut().request_response.send_request(
                                     &peer,
@@ -175,7 +256,7 @@ pub async fn start_p2p_node(
                                 );
                             }
                         }
-                         if let Some(host) = current_host {
+                        if let Some(host) = current_host {
                             swarm.behaviour_mut().request_response.send_request(
                                 &host,
                                 AppRequest::FileContent { path: path.clone(), data: data.clone() }
@@ -188,26 +269,70 @@ pub async fn start_p2p_node(
             
             event = swarm.select_next_some() => {
                 match event {
+                    // --- NEW: Handle Relay Connection ---
+                    SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+                        // If we just connected to the Relay, start listening on the circuit
+                        if Some(peer_id) == relay_peer_id && !relay_circuit_listening {
+                            println!("Connected to Relay {}. Requesting reservation...", peer_id);
+                            if let Some(addr) = &relay_addr_struct {
+                                let listen_via_relay = addr.clone().with(Protocol::P2pCircuit);
+                                if let Err(e) = swarm.listen_on(listen_via_relay) {
+                                    eprintln!("Failed to request relay reservation: {}", e);
+                                } else {
+                                    relay_circuit_listening = true;
+                                }
+                            }
+                        }
+
+                        // [FIX] Send pending Join Request if we just connected to the Host
+                        if Some(peer_id) == pending_join_host {
+                            println!("Connected to Host {}. Sending Join Request now.", peer_id);
+                            swarm.behaviour_mut().request_response.send_request(
+                                &peer_id, 
+                                AppRequest::Join { username: "Guest".into() }
+                            );
+                            pending_join_host = None;
+                        }
+                    },
+                    SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
+                        if Some(peer_id) == Some(relay_peer_id) {
+                            eprintln!("Failed to connect to Relay: {:?}", error);
+                        }
+                        // [FIX] Clear pending join if connection failed
+                        if peer_id == pending_join_host {
+                            eprintln!("Failed to connect to Host {:?}: {:?}", peer_id, error);
+                            pending_join_host = None;
+                        }
+                    },
+                    // ------------------------------------
+
                     SwarmEvent::NewListenAddr { address, .. } => {
                         let addr_str = address.to_string();
                         println!("Listening on {}", addr_str);
                         
-                        // ADD THIS: Save raw address
+                        // Check if this is the relay circuit address
+                        if addr_str.contains("p2p-circuit") {
+                            println!("RELAY RESERVATION SUCCESS! Reachable via Relay.");
+                        }
+
                         state.local_addrs.lock().unwrap_or_else(|e| e.into_inner()).push(addr_str.clone());
-                        
                         let _ = app_handle.emit("new-listen-addr", addr_str.clone());
                         
-                        if addr_str.contains("0.0.0.0") {
+                        if addr_str.contains("0.0.0.0") && !addr_str.contains("p2p-circuit") {
                             if let Some(lan_ip) = get_local_ip() {
                                 let fixed_addr = addr_str.replace("0.0.0.0", &lan_ip.to_string());
                                 println!("Announcing LAN Addr: {}", fixed_addr);
                                 
-                                // ADD THIS: Save LAN address
                                 state.local_addrs.lock().unwrap_or_else(|e| e.into_inner()).push(fixed_addr.clone());
-                                
                                 let _ = app_handle.emit("new-listen-addr", fixed_addr);
                             }
                         }
+                    },
+                    SwarmEvent::Behaviour(MyBehaviourEvent::RelayClient(relay_client::Event::ReservationReqAccepted { .. })) => {
+                        println!("Relay accepted our reservation! We are now reachable via the relay.");
+                    },
+                    SwarmEvent::Behaviour(MyBehaviourEvent::Dcutr(dcutr::Event { remote_peer_id, result: Ok(_) })) => {
+                        println!("HOLE PUNCH SUCCESS! Connected directly to {}", remote_peer_id);
                     },
                     SwarmEvent::Behaviour(MyBehaviourEvent::RequestResponse(request_response::Event::Message { 
                         peer, message: request_response::Message::Request { request, channel, .. }, ..
@@ -256,7 +381,7 @@ pub async fn start_p2p_node(
                     SwarmEvent::Behaviour(MyBehaviourEvent::RequestResponse(request_response::Event::OutboundFailure { 
                         peer, error: _, ..
                     })) => {
-                         if Some(peer) == current_host {
+                        if Some(peer) == current_host {
                             current_host = None;
                             let _ = app_handle.emit("host-disconnected", peer.to_string());
                         }
