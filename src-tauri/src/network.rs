@@ -24,7 +24,7 @@ use crate::protocol::{AppRequest, AppResponse, Payload};
 use crate::state::PeerState;
 
 // TODO: Ideally this should be configurable, but hardcoded for the demo/request context
-const RELAY_ADDRESS: &str = "/ip4/35.212.216.37/udp/4001/quic-v1/p2p/12D3KooWRnpSoBMdUBvhDpo8o9BW3MYhQwjyZ5iVy2f1EEFsuU3F";
+const RELAY_ADDRESS: &str = "/ip4/35.212.216.37/udp/4001/quic-v1/p2p/12D3KooWGty8e23SZbBJTTmyLQjj8joaWU4cqPou46Gp6oGVE6UM";
 
 fn get_local_ip() -> Option<std::net::IpAddr> {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
