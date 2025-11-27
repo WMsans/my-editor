@@ -6,6 +6,7 @@ use libp2p::{
     noise,
     ping,
     relay,
+    connection_limits, 
     SwarmBuilder,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp,
@@ -17,21 +18,20 @@ use std::error::Error;
 use std::net::Ipv4Addr;
 use std::time::Duration;
 
+// 1. Add limits to your Behaviour Struct
 #[derive(NetworkBehaviour)]
 struct RelayNodeBehaviour {
     relay: relay::Behaviour,
     identify: identify::Behaviour,
     ping: ping::Behaviour,
+    limits: connection_limits::Behaviour, // <--- Added here
 }
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// The public IP address of this GCP instance
     #[arg(short, long)]
     public_ip: Option<String>,
-
-    /// Port to listen on (default 4001)
     #[arg(short, long, default_value_t = 4001)]
     port: u16,
 }
@@ -41,53 +41,56 @@ async fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
     let args = Args::parse();
 
-    // 1. Generate Identity
     let id_keys = identity::Keypair::generate_ed25519();
     let local_peer_id = PeerId::from(id_keys.public());
     println!("Local Peer ID: {}", local_peer_id);
 
-    // 2. Configure Behaviours (Relay + Identify + Ping)
+    // 2. Define the Limits
+    let limits = connection_limits::ConnectionLimits::default()
+        .with_max_pending_incoming(Some(10))
+        .with_max_established_incoming(Some(50))
+        .with_max_established_per_peer(Some(2));
+
     let behaviour = RelayNodeBehaviour {
-        // Enable Circuit Relay v2 (Hop)
         relay: relay::Behaviour::new(
             local_peer_id,
             relay::Config {
-                max_reservations: 128,
-                max_circuits: 16,
+                max_reservations: 32,
+                max_circuits: 4,
+                reservation_duration: Duration::from_secs(30 * 60),
+                max_circuit_duration: Duration::from_secs(2 * 60),
+                max_circuit_bytes: 10 * 1024 * 1024, 
                 ..Default::default()
             },
         ),
-        // Allow peers to identify this node (needed for address discovery)
         identify: identify::Behaviour::new(identify::Config::new(
             "/relay/1.0.0".to_string(),
             id_keys.public(),
         )),
         ping: ping::Behaviour::new(ping::Config::new()),
+        // 3. Initialize the Behaviour with the limits
+        limits: connection_limits::Behaviour::new(limits), 
     };
 
-    // 3. Build Swarm
     let mut swarm = SwarmBuilder::with_existing_identity(id_keys)
         .with_tokio()
-        // Support TCP (with Noise + Yamux)
         .with_tcp(
             tcp::Config::default(),
             noise::Config::new,
             yamux::Config::default,
         )?
-        // Support QUIC (UDP)
         .with_quic()
         .with_behaviour(|_| behaviour)?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
+        // REMOVED: .with_connection_limits(limits) <-- This caused the error
         .build();
 
-    // 4. Listen on Interfaces (0.0.0.0 binds to all local interfaces)
     let tcp_addr: Multiaddr = format!("/ip4/0.0.0.0/tcp/{}", args.port).parse()?;
     let quic_addr: Multiaddr = format!("/ip4/0.0.0.0/udp/{}/quic-v1", args.port).parse()?;
 
     swarm.listen_on(tcp_addr)?;
     swarm.listen_on(quic_addr)?;
 
-    // 5. Explicitly announce Public IP if provided
     if let Some(ip) = args.public_ip {
         let public_tcp: Multiaddr = format!("/ip4/{}/tcp/{}", ip, args.port).parse()?;
         let public_quic: Multiaddr = format!("/ip4/{}/udp/{}/quic-v1", ip, args.port).parse()?;
@@ -101,7 +104,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Relay server listening on port {}...", args.port);
 
-    // 6. Event Loop
     loop {
         match swarm.select_next_some().await {
             SwarmEvent::NewListenAddr { address, .. } => {
