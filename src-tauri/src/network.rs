@@ -23,8 +23,8 @@ use serde::Serialize;
 use crate::protocol::{AppRequest, AppResponse, Payload};
 use crate::state::PeerState;
 
-// Ideally this should be configurable, but hardcoded for the demo/request context
-const RELAY_ADDRESS: &str = "/ip4/35.212.216.37/udp/4001/quic-v1/p2p/12D3KooWBSXVpDHG2gdQryLEwG9pbiqiuG11M2n85AmvKcxnMwka";
+// TODO: Ideally this should be configurable, but hardcoded for the demo/request context
+const RELAY_ADDRESS: &str = "/ip4/35.212.216.37/udp/4001/quic-v1/p2p/12D3KooWRnpSoBMdUBvhDpo8o9BW3MYhQwjyZ5iVy2f1EEFsuU3F";
 
 fn get_local_ip() -> Option<std::net::IpAddr> {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;

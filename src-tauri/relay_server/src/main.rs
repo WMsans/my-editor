@@ -1,21 +1,15 @@
 use clap::Parser;
 use libp2p::{
-    core::multiaddr::Protocol,
-    identify,
-    identity,
-    noise,
-    ping,
-    relay,
-    connection_limits, 
-    SwarmBuilder,
+    connection_limits,
+    futures::StreamExt,
+    identify, identity, noise, ping, relay,
     swarm::{NetworkBehaviour, SwarmEvent},
-    tcp,
-    yamux,
-    Multiaddr, PeerId, StreamProtocol,
-    futures::StreamExt
+    tcp, yamux, Multiaddr, PeerId, SwarmBuilder,
 };
 use std::error::Error;
-use std::net::Ipv4Addr;
+use std::fs;
+use std::io::{Read, Write};
+use std::path::Path;
 use std::time::Duration;
 
 // 1. Add limits to your Behaviour Struct
@@ -24,7 +18,7 @@ struct RelayNodeBehaviour {
     relay: relay::Behaviour,
     identify: identify::Behaviour,
     ping: ping::Behaviour,
-    limits: connection_limits::Behaviour, // <--- Added here
+    limits: connection_limits::Behaviour,
 }
 
 #[derive(Parser, Debug)]
@@ -34,6 +28,9 @@ struct Args {
     public_ip: Option<String>,
     #[arg(short, long, default_value_t = 4001)]
     port: u16,
+    /// Path to the file containing the identity keypair
+    #[arg(short = 'k', long, default_value = "identity.key")]
+    key_file: String,
 }
 
 #[tokio::main]
@@ -41,7 +38,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
     let args = Args::parse();
 
-    let id_keys = identity::Keypair::generate_ed25519();
+    // --- PERSISTENCE LOGIC START ---
+    let key_path = Path::new(&args.key_file);
+    
+    let id_keys = if key_path.exists() {
+        println!("Loading identity from {:?}", key_path);
+        let mut file = fs::File::open(key_path)?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        identity::Keypair::from_protobuf_encoding(&bytes)?
+    } else {
+        println!("No identity found. Generating new keypair...");
+        let key = identity::Keypair::generate_ed25519();
+        let bytes = key.to_protobuf_encoding()?;
+        let mut file = fs::File::create(key_path)?;
+        file.write_all(&bytes)?;
+        println!("Saved new identity to {:?}", key_path);
+        key
+    };
+    // --- PERSISTENCE LOGIC END ---
+
     let local_peer_id = PeerId::from(id_keys.public());
     println!("Local Peer ID: {}", local_peer_id);
 
@@ -59,7 +75,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 max_circuits: 4,
                 reservation_duration: Duration::from_secs(30 * 60),
                 max_circuit_duration: Duration::from_secs(2 * 60),
-                max_circuit_bytes: 10 * 1024 * 1024, 
+                max_circuit_bytes: 10 * 1024 * 1024,
                 ..Default::default()
             },
         ),
@@ -69,7 +85,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         )),
         ping: ping::Behaviour::new(ping::Config::new()),
         // 3. Initialize the Behaviour with the limits
-        limits: connection_limits::Behaviour::new(limits), 
+        limits: connection_limits::Behaviour::new(limits),
     };
 
     let mut swarm = SwarmBuilder::with_existing_identity(id_keys)
@@ -82,7 +98,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_quic()
         .with_behaviour(|_| behaviour)?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
-        // REMOVED: .with_connection_limits(limits) <-- This caused the error
         .build();
 
     let tcp_addr: Multiaddr = format!("/ip4/0.0.0.0/tcp/{}", args.port).parse()?;
@@ -94,10 +109,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if let Some(ip) = args.public_ip {
         let public_tcp: Multiaddr = format!("/ip4/{}/tcp/{}", ip, args.port).parse()?;
         let public_quic: Multiaddr = format!("/ip4/{}/udp/{}/quic-v1", ip, args.port).parse()?;
-        
+
         println!("Announcing external address: {}", public_tcp);
         swarm.add_external_address(public_tcp);
-        
+
         println!("Announcing external address: {}", public_quic);
         swarm.add_external_address(public_quic);
     }
@@ -115,7 +130,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 println!("Relay accepted reservation from: {}", src_peer_id);
             }
             SwarmEvent::Behaviour(RelayNodeBehaviourEvent::Relay(
-                relay::Event::CircuitReqAccepted { src_peer_id, dst_peer_id, .. },
+                relay::Event::CircuitReqAccepted {
+                    src_peer_id,
+                    dst_peer_id,
+                    ..
+                },
             )) => {
                 println!("Relay accepted circuit: {} -> {}", src_peer_id, dst_peer_id);
             }
