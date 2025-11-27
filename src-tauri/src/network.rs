@@ -2,7 +2,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use std::time::Duration;
 use std::fs; 
 use libp2p::{
-    noise, tcp, yamux,
+    // Removed tcp, noise, yamux
     swarm::{NetworkBehaviour, SwarmEvent, dial_opts::DialOpts},
     SwarmBuilder, PeerId, StreamProtocol, Multiaddr, 
     request_response::{self, ProtocolSupport},
@@ -18,8 +18,9 @@ use crate::state::PeerState;
 // NEW: Helper to find local LAN IP
 fn get_local_ip() -> Option<std::net::IpAddr> {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
-    // We don't actually send data, just determining the route to a public IP
-    socket.connect("8.8.8.8:80").ok()?;
+    // Changed to 53 (DNS) which is typically UDP. 
+    // This ensures we get the IP of the interface used for UDP traffic.
+    socket.connect("8.8.8.8:53").ok()?;
     socket.local_addr().ok().map(|addr| addr.ip())
 }
 
@@ -66,7 +67,7 @@ pub async fn start_p2p_node(
 
     let mut swarm = SwarmBuilder::with_existing_identity(keypair)
         .with_tokio()
-        .with_tcp(tcp::Config::default(), noise::Config::new, yamux::Config::default)?
+        .with_quic() // REPLACED: .with_tcp(...) -> .with_quic()
         .with_behaviour(|_key| {
             let request_response = request_response::json::Behaviour::new(
                 [(StreamProtocol::new("/collab/1.0.0"), ProtocolSupport::Full)],
@@ -82,7 +83,8 @@ pub async fn start_p2p_node(
     *state.local_peer_id.lock().unwrap_or_else(|e| e.into_inner()) = Some(local_peer_id.clone());
     let _ = app_handle.emit("local-peer-id", local_peer_id);
 
-    swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
+    // CHANGED: Listen on UDP/QUIC instead of TCP
+    swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
 
     let mut current_host: Option<PeerId> = None;
     let mut heartbeat = tokio::time::interval(Duration::from_secs(3));
@@ -192,9 +194,7 @@ pub async fn start_p2p_node(
                         let addr_str = address.to_string();
                         println!("Listening on {}", addr_str);
                         
-                        // ADD THIS: Save raw address
                         state.local_addrs.lock().unwrap_or_else(|e| e.into_inner()).push(addr_str.clone());
-                        
                         let _ = app_handle.emit("new-listen-addr", addr_str.clone());
                         
                         if addr_str.contains("0.0.0.0") {
@@ -202,9 +202,7 @@ pub async fn start_p2p_node(
                                 let fixed_addr = addr_str.replace("0.0.0.0", &lan_ip.to_string());
                                 println!("Announcing LAN Addr: {}", fixed_addr);
                                 
-                                // ADD THIS: Save LAN address
                                 state.local_addrs.lock().unwrap_or_else(|e| e.into_inner()).push(fixed_addr.clone());
-                                
                                 let _ = app_handle.emit("new-listen-addr", fixed_addr);
                             }
                         }
