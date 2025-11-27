@@ -1,10 +1,12 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 
 interface SettingsProps {
   isOpen: boolean;
   onClose: () => void;
   sshKeyPath: string;
   setSshKeyPath: (path: string) => void;
+  encryptionKey: string;
+  setEncryptionKey: (key: string) => void;
   detectedRemote: string;
 }
 
@@ -13,9 +15,38 @@ export const Settings: React.FC<SettingsProps> = ({
   onClose,
   sshKeyPath,
   setSshKeyPath,
+  encryptionKey,
+  setEncryptionKey,
   detectedRemote
 }) => {
+  // Local state for deferred saving
+  const [localSshPath, setLocalSshPath] = useState(sshKeyPath);
+  const [localEncKey, setLocalEncKey] = useState(encryptionKey);
+
+  // Reset local state when opening
+  useEffect(() => {
+    if (isOpen) {
+      setLocalSshPath(sshKeyPath);
+      setLocalEncKey(encryptionKey);
+    }
+  }, [isOpen, sshKeyPath, encryptionKey]);
+
   if (!isOpen) return null;
+
+  const generateKey = () => {
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
+    let result = "";
+    for (let i = 0; i < 32; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setLocalEncKey(result);
+  };
+
+  const handleSave = () => {
+    setSshKeyPath(localSshPath);
+    setEncryptionKey(localEncKey);
+    onClose();
+  };
 
   return (
     <div className="settings-overlay" onClick={onClose}>
@@ -26,12 +57,28 @@ export const Settings: React.FC<SettingsProps> = ({
           <label>SSH Private Key Path (Optional)</label>
           <input 
             type="text" 
-            value={sshKeyPath} 
-            onChange={(e) => setSshKeyPath(e.target.value)} 
+            value={localSshPath} 
+            onChange={(e) => setLocalSshPath(e.target.value)} 
             placeholder="/Users/username/.ssh/id_rsa"
           />
           <small>
             Leave empty to use <code>~/.ssh/config</code> or SSH Agent.
+          </small>
+        </div>
+
+        <div className="setting-group">
+          <label>IP Encryption Key (Optional)</label>
+          <div className="row">
+            <input 
+              type="password" 
+              value={localEncKey} 
+              onChange={(e) => setLocalEncKey(e.target.value)} 
+              placeholder="Enter secret key..."
+            />
+            <button onClick={generateKey} style={{ whiteSpace: 'nowrap' }}>Generate</button>
+          </div>
+          <small>
+            If set, your IP address in the project file will be encrypted.
           </small>
         </div>
 
@@ -43,7 +90,13 @@ export const Settings: React.FC<SettingsProps> = ({
         )}
 
         <div className="actions">
-          <button onClick={onClose} className="btn-close">Close</button>
+          <button 
+            onClick={handleSave} 
+            style={{ marginRight: "10px", background: "#89b4fa", color: "#1e1e2e" }}
+          >
+            Save Changes
+          </button>
+          <button onClick={onClose} className="btn-close">Cancel</button>
         </div>
       </div>
     </div>

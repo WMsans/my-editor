@@ -24,6 +24,15 @@ function App() {
   const [warningMsg, setWarningMsg] = useState<string | null>(null);
   const deadHostIdRef = useRef<string | null>(null);
 
+  // --- Encryption State ---
+  const [encryptionKey, setEncryptionKey] = useState(localStorage.getItem("encryptionKey") || "");
+  const encryptionKeyRef = useRef(encryptionKey);
+  
+  useEffect(() => {
+    encryptionKeyRef.current = encryptionKey;
+    localStorage.setItem("encryptionKey", encryptionKey);
+  }, [encryptionKey]);
+
   // --- Project & File System Hook ---
   const {
     rootPath, rootPathRef,
@@ -54,7 +63,7 @@ function App() {
   const { 
     myPeerId, incomingRequest, isHost, isJoining, status, setStatus,
     sendJoinRequest, acceptRequest, rejectRequest, requestSync, myAddresses,
-    connectedPeers // <--- Destructure new state
+    connectedPeers
   } = useP2P(handleProjectReceived, handleHostDisconnect, handleFileSync);
 
   const isHostRef = useRef(isHost);
@@ -64,7 +73,6 @@ function App() {
     documentRegistry.setIsHost(isHost);
   }, [isHost]);
 
-  // Create a ref for connectedPeers to access it in the closure of useAppLifecycle
   const connectedPeersRef = useRef(connectedPeers);
   useEffect(() => { connectedPeersRef.current = connectedPeers; }, [connectedPeers]);
 
@@ -74,6 +82,8 @@ function App() {
     myPeerId,
     myAddresses,
     sshKeyPathRef,
+    encryptionKeyRef, // Pass Ref
+    setEncryptionKey, // Pass Setter
     isHost,
     deadHostIdRef,
     isAutoJoiningRef: isAutoJoining,
@@ -90,7 +100,7 @@ function App() {
     sshKeyPathRef,
     isHostRef,
     setWarningMsg,
-    connectedPeersRef // <--- Pass the ref
+    connectedPeersRef
   });
 
   // --- Editor Manager Hook ---
@@ -111,19 +121,15 @@ function App() {
     editor?.commands.clearContent();
   };
 
-  // --- Handle Save Logic ---
   const handleSave = async () => {
     if (!rootPath) {
         setWarningMsg("Cannot save: No project folder opened.");
         return;
     }
-
-    // [FIX] Block Guest from saving to disk directly
     if (!isHost) {
         setWarningMsg("Guests cannot save or create files on disk directly. Your changes are synced to the Host automatically.");
         return;
     }
-
     try {
         if (currentFilePath) {
             const relPath = getRelativePath(currentFilePath);
@@ -133,17 +139,13 @@ function App() {
         } else {
             const name = prompt("Enter file name (e.g., page.md):");
             if (!name) return;
-
             const sep = rootPath.includes("\\") ? "\\" : "/";
             const newPath = `${rootPath}${sep}${name}`;
-            
             const content = Y.encodeStateAsUpdate(currentDoc);
-
             await invoke("write_file_content", { 
                 path: newPath, 
                 content: Array.from(content) 
             });
-
             setFileSystemRefresh(prev => prev + 1);
             setCurrentFilePath(newPath);
         }
@@ -168,6 +170,8 @@ function App() {
         onClose={() => setShowSettings(false)}
         sshKeyPath={sshKeyPath}
         setSshKeyPath={setSshKeyPath}
+        encryptionKey={encryptionKey}
+        setEncryptionKey={setEncryptionKey}
         detectedRemote={detectedRemote}
       />
 

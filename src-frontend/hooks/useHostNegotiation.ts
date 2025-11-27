@@ -3,11 +3,46 @@ import { invoke } from "@tauri-apps/api/core";
 
 const META_FILE = ".collab_meta.json";
 
+// --- Simple Crypto Helpers ---
+const ENC = new TextEncoder();
+const DEC = new TextDecoder();
+
+const getKey = async (password: string) => {
+  const keyMaterial = await window.crypto.subtle.importKey("raw", ENC.encode(password), "PBKDF2", false, ["deriveKey"]);
+  // Using a fixed salt for simplicity in this file-based demo. In production, store salt in JSON.
+  return window.crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: ENC.encode("COLLAB_FIXED_SALT_V1"), iterations: 100000, hash: "SHA-256" },
+    keyMaterial, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]
+  );
+};
+
+const encryptData = async (data: string, password: string): Promise<string> => {
+    const key = await getKey(password);
+    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    const encrypted = await window.crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, ENC.encode(data));
+    const buf = new Uint8Array(encrypted);
+    const b64 = btoa(String.fromCharCode(...buf));
+    const ivHex = Array.from(iv).map(b => b.toString(16).padStart(2, '0')).join('');
+    return `${ivHex}:${b64}`;
+};
+
+const decryptData = async (cipherText: string, password: string): Promise<string> => {
+    const [ivHex, dataB64] = cipherText.split(':');
+    const iv = new Uint8Array(ivHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    const data = Uint8Array.from(atob(dataB64), c => c.charCodeAt(0));
+    const key = await getKey(password);
+    const decrypted = await window.crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, data);
+    return DEC.decode(decrypted);
+};
+// -----------------------------
+
 interface UseHostNegotiationProps {
   rootPath: string;
   myPeerId: string | null;
   myAddresses: string[];
   sshKeyPathRef: React.MutableRefObject<string>;
+  encryptionKeyRef: React.MutableRefObject<string>; // Add Ref for encryption key
+  setEncryptionKey: (key: string) => void;          // To update key on successful prompt
   isHost: boolean;
   deadHostIdRef: React.MutableRefObject<string | null>;
   isAutoJoiningRef: React.MutableRefObject<boolean>;
@@ -21,6 +56,8 @@ export function useHostNegotiation({
   myPeerId,
   myAddresses,
   sshKeyPathRef,
+  encryptionKeyRef,
+  setEncryptionKey,
   isHost,
   deadHostIdRef,
   isAutoJoiningRef,
@@ -47,18 +84,57 @@ export function useHostNegotiation({
         
         let metaHost = "";
         let metaAddrs: string[] = [];
+        let isEncrypted = false;
+
         try {
             const contentBytes = await invoke<number[]>("read_file_content", { path: metaPath });
             const content = new TextDecoder().decode(new Uint8Array(contentBytes));
             const json = JSON.parse(content);
+            
             metaHost = json.hostId;
-            metaAddrs = json.hostAddrs || [];
+            isEncrypted = json.encrypted || false;
+
+            if (isEncrypted) {
+                let decrypted = false;
+                let currentKey = encryptionKeyRef.current;
+
+                // Try current key first
+                if (currentKey) {
+                    try {
+                        const decryptedJsonStr = await decryptData(json.hostAddrs, currentKey);
+                        metaAddrs = JSON.parse(decryptedJsonStr);
+                        decrypted = true;
+                    } catch (e) {
+                        console.log("Current encryption key failed.");
+                    }
+                }
+
+                // If failed or no key, prompt user
+                while (!decrypted) {
+                    const userInput = prompt("This project has encrypted IP addresses.\nPlease enter the decryption key:");
+                    if (userInput === null) {
+                        setStatus("Decryption cancelled. Offline.");
+                        return; // User cancelled
+                    }
+                    try {
+                        const decryptedJsonStr = await decryptData(json.hostAddrs, userInput);
+                        metaAddrs = JSON.parse(decryptedJsonStr);
+                        decrypted = true;
+                        setEncryptionKey(userInput); // Save the correct key
+                        encryptionKeyRef.current = userInput; // Update ref immediately for this run
+                    } catch (e) {
+                        alert("Incorrect key. Please try again.");
+                    }
+                }
+            } else {
+                metaAddrs = json.hostAddrs || [];
+            }
+
         } catch (e) {
-            console.log("Meta file missing or invalid.");
+            console.log("Meta file missing, invalid, or read error.", e);
         }
 
         if (metaHost && metaHost !== myPeerId) {
-            // If the meta points to the dead host, ignore it and claim host.
             if (deadHostIdRef.current && metaHost === deadHostIdRef.current) {
                 console.log("Ignoring disconnected host ID in meta file.");
             } else {
@@ -82,7 +158,27 @@ export function useHostNegotiation({
              setStatus("Updating host addresses...");
         }
 
-        const content = new TextEncoder().encode(JSON.stringify({ hostId: myPeerId, hostAddrs: myAddresses }, null, 2));
+        // WRITE LOGIC
+        let storedAddrs: any = myAddresses;
+        let encryptedFlag = false;
+        
+        if (encryptionKeyRef.current) {
+            try {
+                storedAddrs = await encryptData(JSON.stringify(myAddresses), encryptionKeyRef.current);
+                encryptedFlag = true;
+            } catch (e) {
+                console.error("Encryption failed:", e);
+                setWarningMsg("Failed to encrypt IP addresses. Saving unencrypted.");
+            }
+        }
+
+        const metaObj = { 
+            hostId: myPeerId, 
+            hostAddrs: storedAddrs,
+            encrypted: encryptedFlag 
+        };
+
+        const content = new TextEncoder().encode(JSON.stringify(metaObj, null, 2));
         await invoke("write_file_content", { 
             path: metaPath, 
             content: Array.from(content)
@@ -110,14 +206,12 @@ export function useHostNegotiation({
 
   const prevIsHost = useRef(isHost);
 
-  // Trigger negotiation when rootPath changes or we become the host
   useEffect(() => {
     if (rootPath && myPeerId) {
        negotiateHost();
     }
   }, [rootPath, myPeerId, myAddresses]); 
 
-  // Trigger negotiation if we switch roles to Host
   useEffect(() => {
     if (!prevIsHost.current && isHost && rootPath) {
         negotiateHost();
