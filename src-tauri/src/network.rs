@@ -11,9 +11,9 @@ use libp2p::{
     identify,
     ping,
     core::multiaddr::Protocol,
-    noise, // Added: Required for relay transport upgrade
-    yamux, // Added: Required for relay transport upgrade
-    core::upgrade::Version, // Added: Required for upgrade version
+    noise, // Required for relay transport upgrade
+    yamux, // Required for relay transport upgrade
+    core::upgrade::Version, // Required for upgrade version
     Transport
 };
 use tokio::sync::mpsc::Receiver;
@@ -23,6 +23,7 @@ use serde::Serialize;
 use crate::protocol::{AppRequest, AppResponse, Payload};
 use crate::state::PeerState;
 
+// Ideally this should be configurable, but hardcoded for the demo/request context
 const RELAY_ADDRESS: &str = "/ip4/35.212.216.37/udp/4001/quic-v1/p2p/12D3KooWBSXVpDHG2gdQryLEwG9pbiqiuG11M2n85AmvKcxnMwka";
 
 fn get_local_ip() -> Option<std::net::IpAddr> {
@@ -85,11 +86,10 @@ pub async fn start_p2p_node(
     let (relay_transport, relay_behaviour) = relay_client::new(local_peer_id);
 
     // 2. Build Swarm with Relay + DCUtR + QUIC
+    // We upgrade the relay transport to support noise/yamux so we can drive DCUtR over it.
     let mut swarm = SwarmBuilder::with_existing_identity(keypair)
         .with_tokio()
         .with_quic()
-        // FIXED: The relay transport must be upgraded with authentication (Noise) 
-        // and multiplexing (Yamux) to satisfy the SwarmBuilder's transport requirements.
         .with_other_transport(|key| {
             let noise_config = noise::Config::new(key).expect("failed to create noise config");
             let yamux_config = yamux::Config::default();
@@ -106,7 +106,7 @@ pub async fn start_p2p_node(
                 request_response::Config::default()
             );
             
-            // Identify is required for DCUtR and generic peer discovery
+            // Identify is required for DCUtR to exchange public addresses
             let identify = identify::Behaviour::new(identify::Config::new(
                 "/collab/1.0.0".to_string(),
                 key.public(),
@@ -157,26 +157,40 @@ pub async fn start_p2p_node(
                     ("join", Payload::JoinCall { peer_id: peer_str, remote_addrs }) => {
                         if let Ok(peer) = peer_str.parse::<PeerId>() {
                              let mut multiaddrs = Vec::new();
+                             
+                             // 1. Add explicitly provided addresses (e.g., from git meta file)
                              for addr_str in remote_addrs {
                                  if let Ok(addr) = addr_str.parse::<Multiaddr>() {
                                      multiaddrs.push(addr);
                                  }
                              }
                              
-                             if !multiaddrs.is_empty() {
-                                 let opts = DialOpts::peer_id(peer)
-                                     .addresses(multiaddrs)
-                                     .build();
-                                 let _ = swarm.dial(opts);
+                             // 2. Add Relay Circuit Address (Automatic Fallback)
+                             // This ensures that if the Guest cannot reach the Host directly (NAT),
+                             // we attempt to tunnel through the relay. DCUtR will then upgrade this to a direct link.
+                             if let Ok(relay_addr) = RELAY_ADDRESS.parse::<Multiaddr>() {
+                                 // Construct: <RelayAddr>/p2p-circuit/p2p/<TargetPeerId>
+                                 let circuit_addr = relay_addr
+                                    .with(Protocol::P2pCircuit)
+                                    .with(Protocol::P2p(peer));
+                                 
+                                 println!("(Join) Adding Relay Circuit Address: {}", circuit_addr);
+                                 multiaddrs.push(circuit_addr);
                              }
-                            
-                            // Also try to dial just the peer ID (if we are connected to the same relay, this might help)
-                            let _ = swarm.dial(peer);
+                             
+                             // Dial with all gathered addresses
+                             let opts = DialOpts::peer_id(peer)
+                                 .addresses(multiaddrs)
+                                 .build();
+                             
+                             // We ignore errors here; the request_response might queue or fail independently.
+                             // Dialing explicitly ensures the Swarm knows the relay path.
+                             let _ = swarm.dial(opts);
 
-                            swarm.behaviour_mut().request_response.send_request(
-                                &peer, 
-                                AppRequest::Join { username: "Guest".into() }
-                            );
+                             swarm.behaviour_mut().request_response.send_request(
+                                 &peer, 
+                                 AppRequest::Join { username: "Guest".into() }
+                             );
                         }
                     },
                     ("accept", Payload::JoinAccept { peer_id, content }) => {
@@ -254,7 +268,6 @@ pub async fn start_p2p_node(
                         state.local_addrs.lock().unwrap_or_else(|e| e.into_inner()).push(addr_str.clone());
                         let _ = app_handle.emit("new-listen-addr", addr_str.clone());
                         
-                        // If it's the simple 0.0.0.0 address, try to announce LAN IP
                         if addr_str.contains("0.0.0.0") && !addr_str.contains("p2p-circuit") {
                             if let Some(lan_ip) = get_local_ip() {
                                 let fixed_addr = addr_str.replace("0.0.0.0", &lan_ip.to_string());
@@ -268,7 +281,7 @@ pub async fn start_p2p_node(
                     SwarmEvent::Behaviour(MyBehaviourEvent::RelayClient(relay_client::Event::ReservationReqAccepted { .. })) => {
                         println!("Relay accepted our reservation! We are now reachable via the relay.");
                     },
-                    // FIXED: dcutr::Event is a struct with fields `remote_peer_id` and `result`, not an enum variant.
+                    // DCUtR Success Event:
                     SwarmEvent::Behaviour(MyBehaviourEvent::Dcutr(dcutr::Event { remote_peer_id, result: Ok(_) })) => {
                         println!("HOLE PUNCH SUCCESS! Connected directly to {}", remote_peer_id);
                     },
