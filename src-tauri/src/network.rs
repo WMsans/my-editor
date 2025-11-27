@@ -149,6 +149,9 @@ pub async fn start_p2p_node(
     let mut current_host: Option<PeerId> = None;
     let mut heartbeat = tokio::time::interval(Duration::from_secs(3));
     let mut relay_circuit_listening = false;
+    
+    // [FIX] State to track pending join request
+    let mut pending_join_host: Option<PeerId> = None;
 
     loop {
         tokio::select! {
@@ -184,12 +187,19 @@ pub async fn start_p2p_node(
                                 .addresses(multiaddrs)
                                 .build();
                             
+                            // [FIX] Dial first, send request only after connection logic below
                             let _ = swarm.dial(opts);
-
-                            swarm.behaviour_mut().request_response.send_request(
-                                &peer, 
-                                AppRequest::Join { username: "Guest".into() }
-                            );
+                            
+                            if swarm.is_connected(&peer) {
+                                println!("Already connected to {}. Sending Join Request immediately.", peer);
+                                swarm.behaviour_mut().request_response.send_request(
+                                    &peer, 
+                                    AppRequest::Join { username: "Guest".into() }
+                                );
+                            } else {
+                                println!("Dialing {}. Request queued until connection established.", peer);
+                                pending_join_host = Some(peer);
+                            }
                         }
                     },
                     ("accept", Payload::JoinAccept { peer_id, content }) => {
@@ -273,10 +283,25 @@ pub async fn start_p2p_node(
                                 }
                             }
                         }
+
+                        // [FIX] Send pending Join Request if we just connected to the Host
+                        if Some(peer_id) == pending_join_host {
+                            println!("Connected to Host {}. Sending Join Request now.", peer_id);
+                            swarm.behaviour_mut().request_response.send_request(
+                                &peer_id, 
+                                AppRequest::Join { username: "Guest".into() }
+                            );
+                            pending_join_host = None;
+                        }
                     },
                     SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
                         if Some(peer_id) == Some(relay_peer_id) {
                             eprintln!("Failed to connect to Relay: {:?}", error);
+                        }
+                        // [FIX] Clear pending join if connection failed
+                        if peer_id == pending_join_host {
+                            eprintln!("Failed to connect to Host {:?}: {:?}", peer_id, error);
+                            pending_join_host = None;
                         }
                     },
                     // ------------------------------------
