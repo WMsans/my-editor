@@ -14,6 +14,7 @@ import { useEditorManager } from "./hooks/useEditorManager";
 import { MenuBar } from "./components/MenuBar";
 import { Settings } from "./components/Settings";
 import { WarningModal } from "./components/WarningModal";
+import { PasswordModal } from "./components/PasswordModal"; // [NEW]
 import { Sidebar } from "./components/Sidebar";
 import { EditorArea } from "./components/EditorArea";
 import "./App.css";
@@ -23,6 +24,12 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [warningMsg, setWarningMsg] = useState<string | null>(null);
   const deadHostIdRef = useRef<string | null>(null);
+
+  // --- Password Modal State ---
+  const [passwordRequest, setPasswordRequest] = useState<{
+    message: string;
+    resolve: (val: string | null) => void;
+  } | null>(null);
 
   // --- Encryption State ---
   const [encryptionKey, setEncryptionKey] = useState(localStorage.getItem("encryptionKey") || "");
@@ -76,20 +83,42 @@ function App() {
   const connectedPeersRef = useRef(connectedPeers);
   useEffect(() => { connectedPeersRef.current = connectedPeers; }, [connectedPeers]);
 
+  // --- Password Request Handler (Promisified) ---
+  const requestPassword = useCallback((message: string) => {
+    return new Promise<string | null>((resolve) => {
+      setPasswordRequest({ message, resolve });
+    });
+  }, []);
+
+  const handlePasswordSubmit = (password: string) => {
+    if (passwordRequest) {
+      passwordRequest.resolve(password);
+      setPasswordRequest(null);
+    }
+  };
+
+  const handlePasswordCancel = () => {
+    if (passwordRequest) {
+      passwordRequest.resolve(null);
+      setPasswordRequest(null);
+    }
+  };
+
   // --- Host Negotiation Hook ---
   useHostNegotiation({
     rootPath,
     myPeerId,
     myAddresses,
     sshKeyPathRef,
-    encryptionKeyRef, // Pass Ref
-    setEncryptionKey, // Pass Setter
+    encryptionKeyRef,
+    setEncryptionKey,
     isHost,
     deadHostIdRef,
     isAutoJoiningRef: isAutoJoining,
     sendJoinRequest,
     setStatus,
-    setWarningMsg
+    setWarningMsg,
+    requestPassword // Pass the callback
   });
 
   // --- App Lifecycle Hook ---
@@ -173,6 +202,14 @@ function App() {
         encryptionKey={encryptionKey}
         setEncryptionKey={setEncryptionKey}
         detectedRemote={detectedRemote}
+      />
+
+      {/* New Password Modal */}
+      <PasswordModal 
+        isOpen={!!passwordRequest}
+        message={passwordRequest?.message || ""}
+        onSubmit={handlePasswordSubmit}
+        onCancel={handlePasswordCancel}
       />
 
       <WarningModal 

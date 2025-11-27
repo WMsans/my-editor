@@ -9,7 +9,7 @@ const DEC = new TextDecoder();
 
 const getKey = async (password: string) => {
   const keyMaterial = await window.crypto.subtle.importKey("raw", ENC.encode(password), "PBKDF2", false, ["deriveKey"]);
-  // Using a fixed salt for simplicity in this file-based demo. In production, store salt in JSON.
+  // Using a fixed salt for simplicity in this file-based demo.
   return window.crypto.subtle.deriveKey(
     { name: "PBKDF2", salt: ENC.encode("COLLAB_FIXED_SALT_V1"), iterations: 100000, hash: "SHA-256" },
     keyMaterial, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]
@@ -41,14 +41,15 @@ interface UseHostNegotiationProps {
   myPeerId: string | null;
   myAddresses: string[];
   sshKeyPathRef: React.MutableRefObject<string>;
-  encryptionKeyRef: React.MutableRefObject<string>; // Add Ref for encryption key
-  setEncryptionKey: (key: string) => void;          // To update key on successful prompt
+  encryptionKeyRef: React.MutableRefObject<string>;
+  setEncryptionKey: (key: string) => void;
   isHost: boolean;
   deadHostIdRef: React.MutableRefObject<string | null>;
   isAutoJoiningRef: React.MutableRefObject<boolean>;
   sendJoinRequest: (peerId: string, addrs: string[]) => void;
   setStatus: (status: string) => void;
   setWarningMsg: (msg: string | null) => void;
+  requestPassword: (msg: string) => Promise<string | null>; // [NEW] Callback
 }
 
 export function useHostNegotiation({
@@ -63,19 +64,26 @@ export function useHostNegotiation({
   isAutoJoiningRef,
   sendJoinRequest,
   setStatus,
-  setWarningMsg
+  setWarningMsg,
+  requestPassword // [NEW] Destructured
 }: UseHostNegotiationProps) {
+
+  const isNegotiatingRef = useRef(false);
 
   const negotiateHost = async (retryCount = 0) => {
     if (!rootPath || !myPeerId) return;
     
-    setStatus(retryCount > 0 ? `Negotiating (Attempt ${retryCount + 1})...` : "Negotiating host...");
+    if (retryCount === 0 && isNegotiatingRef.current) return;
     
-    const sep = rootPath.includes("\\") ? "\\": "/";
-    const metaPath = `${rootPath}${sep}${META_FILE}`;
-    const ssh = sshKeyPathRef.current || "";
+    isNegotiatingRef.current = true;
 
     try {
+        setStatus(retryCount > 0 ? `Negotiating (Attempt ${retryCount + 1})...` : "Negotiating host...");
+        
+        const sep = rootPath.includes("\\") ? "\\": "/";
+        const metaPath = `${rootPath}${sep}${META_FILE}`;
+        const ssh = sshKeyPathRef.current || "";
+
         try {
             await invoke("git_pull", { path: rootPath, sshKeyPath: ssh });
         } catch (e) {
@@ -98,7 +106,7 @@ export function useHostNegotiation({
                 let decrypted = false;
                 let currentKey = encryptionKeyRef.current;
 
-                // Try current key first
+                // 1. Try currently saved key first (silent attempt)
                 if (currentKey) {
                     try {
                         const decryptedJsonStr = await decryptData(json.hostAddrs, currentKey);
@@ -109,21 +117,30 @@ export function useHostNegotiation({
                     }
                 }
 
-                // If failed or no key, prompt user
+                // 2. Loop until decrypted or cancelled
+                let retryMessage = "";
                 while (!decrypted) {
-                    const userInput = prompt("This project has encrypted IP addresses.\nPlease enter the decryption key:");
+                    const msg = retryMessage || "This project has encrypted IP addresses.\nPlease enter the decryption key:";
+                    
+                    // Call the Modal via Promise
+                    const userInput = await requestPassword(msg);
+                    
                     if (userInput === null) {
                         setStatus("Decryption cancelled. Offline.");
-                        return; // User cancelled
+                        return; // Exit completely
                     }
+                    
                     try {
                         const decryptedJsonStr = await decryptData(json.hostAddrs, userInput);
                         metaAddrs = JSON.parse(decryptedJsonStr);
                         decrypted = true;
-                        setEncryptionKey(userInput); // Save the correct key
-                        encryptionKeyRef.current = userInput; // Update ref immediately for this run
+                        
+                        // Success! Update global state
+                        setEncryptionKey(userInput); 
+                        encryptionKeyRef.current = userInput; 
                     } catch (e) {
-                        alert("Incorrect key. Please try again.");
+                        retryMessage = "⛔ Incorrect key. Please try again.";
+                        // Loop continues...
                     }
                 }
             } else {
@@ -201,6 +218,8 @@ export function useHostNegotiation({
 
     } catch (e) {
         console.error("Negotiation fatal error:", e);
+    } finally {
+        isNegotiatingRef.current = false;
     }
   };
 
