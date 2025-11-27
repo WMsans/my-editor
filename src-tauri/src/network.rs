@@ -2,11 +2,19 @@ use tauri::{AppHandle, Emitter, Manager};
 use std::time::Duration;
 use std::fs; 
 use libp2p::{
-    // Removed tcp, noise, yamux
     swarm::{NetworkBehaviour, SwarmEvent, dial_opts::DialOpts},
     SwarmBuilder, PeerId, StreamProtocol, Multiaddr, 
     request_response::{self, ProtocolSupport},
-    identity, 
+    identity,
+    relay::client as relay_client,
+    dcutr,
+    identify,
+    ping,
+    core::multiaddr::Protocol,
+    noise, // Added: Required for relay transport upgrade
+    yamux, // Added: Required for relay transport upgrade
+    core::upgrade::Version, // Added: Required for upgrade version
+    Transport
 };
 use tokio::sync::mpsc::Receiver;
 use futures::stream::StreamExt; 
@@ -15,11 +23,10 @@ use serde::Serialize;
 use crate::protocol::{AppRequest, AppResponse, Payload};
 use crate::state::PeerState;
 
-// NEW: Helper to find local LAN IP
+const RELAY_ADDRESS: &str = "/ip4/35.212.216.37/udp/4001/quic-v1/p2p/12D3KooWBSXVpDHG2gdQryLEwG9pbiqiuG11M2n85AmvKcxnMwka";
+
 fn get_local_ip() -> Option<std::net::IpAddr> {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
-    // Changed to 53 (DNS) which is typically UDP. 
-    // This ensures we get the IP of the interface used for UDP traffic.
     socket.connect("8.8.8.8:53").ok()?;
     socket.local_addr().ok().map(|addr| addr.ip())
 }
@@ -27,6 +34,10 @@ fn get_local_ip() -> Option<std::net::IpAddr> {
 #[derive(NetworkBehaviour)]
 struct MyBehaviour {
     request_response: request_response::json::Behaviour<AppRequest, AppResponse>,
+    relay_client: relay_client::Behaviour,
+    dcutr: dcutr::Behaviour,
+    identify: identify::Behaviour,
+    ping: ping::Behaviour,
 }
 
 #[derive(Serialize, Clone)]
@@ -65,26 +76,70 @@ pub async fn start_p2p_node(
         key
     };
 
+    let local_peer_id = PeerId::from(keypair.public());
+    println!("Local Peer ID: {}", local_peer_id);
+    *state.local_peer_id.lock().unwrap_or_else(|e| e.into_inner()) = Some(local_peer_id.to_string());
+    let _ = app_handle.emit("local-peer-id", local_peer_id.to_string());
+
+    // 1. Create Relay Client
+    let (relay_transport, relay_behaviour) = relay_client::new(local_peer_id);
+
+    // 2. Build Swarm with Relay + DCUtR + QUIC
     let mut swarm = SwarmBuilder::with_existing_identity(keypair)
         .with_tokio()
-        .with_quic() // REPLACED: .with_tcp(...) -> .with_quic()
-        .with_behaviour(|_key| {
+        .with_quic()
+        // FIXED: The relay transport must be upgraded with authentication (Noise) 
+        // and multiplexing (Yamux) to satisfy the SwarmBuilder's transport requirements.
+        .with_other_transport(|key| {
+            let noise_config = noise::Config::new(key).expect("failed to create noise config");
+            let yamux_config = yamux::Config::default();
+
+            relay_transport
+                .upgrade(Version::V1)
+                .authenticate(noise_config)
+                .multiplex(yamux_config)
+        })? 
+        .with_dns()? 
+        .with_behaviour(|key| {
             let request_response = request_response::json::Behaviour::new(
                 [(StreamProtocol::new("/collab/1.0.0"), ProtocolSupport::Full)],
                 request_response::Config::default()
             );
-            Ok(MyBehaviour { request_response })
+            
+            // Identify is required for DCUtR and generic peer discovery
+            let identify = identify::Behaviour::new(identify::Config::new(
+                "/collab/1.0.0".to_string(),
+                key.public(),
+            ));
+
+            Ok(MyBehaviour { 
+                request_response,
+                relay_client: relay_behaviour,
+                dcutr: dcutr::Behaviour::new(local_peer_id),
+                identify,
+                ping: ping::Behaviour::new(ping::Config::new()),
+            })
         })?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
 
-    let local_peer_id = swarm.local_peer_id().to_string();
-    println!("Local Peer ID: {}", local_peer_id);
-    *state.local_peer_id.lock().unwrap_or_else(|e| e.into_inner()) = Some(local_peer_id.clone());
-    let _ = app_handle.emit("local-peer-id", local_peer_id);
-
-    // CHANGED: Listen on UDP/QUIC instead of TCP
+    // 3. Listen on Local Interface (QUIC/UDP)
     swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
+
+    // 4. Bootstrap: Connect to Relay and Listen via Relay
+    if let Ok(relay_addr) = RELAY_ADDRESS.parse::<Multiaddr>() {
+        println!("Dialing Relay: {}", relay_addr);
+        // A. Dial the relay
+        swarm.dial(DialOpts::from(relay_addr.clone()))?;
+        
+        // B. Listen via the relay (Circuit Relay)
+        // This constructs an address like: /ip4/.../p2p/QmRelay/p2p-circuit
+        let listen_via_relay = relay_addr.with(Protocol::P2pCircuit);
+        println!("Requesting to listen via relay: {}", listen_via_relay);
+        swarm.listen_on(listen_via_relay)?;
+    } else {
+        eprintln!("WARNING: Invalid RELAY_ADDRESS. Hole punching will not work.");
+    }
 
     let mut current_host: Option<PeerId> = None;
     let mut heartbeat = tokio::time::interval(Duration::from_secs(3));
@@ -114,6 +169,9 @@ pub async fn start_p2p_node(
                                      .build();
                                  let _ = swarm.dial(opts);
                              }
+                            
+                            // Also try to dial just the peer ID (if we are connected to the same relay, this might help)
+                            let _ = swarm.dial(peer);
 
                             swarm.behaviour_mut().request_response.send_request(
                                 &peer, 
@@ -134,7 +192,6 @@ pub async fn start_p2p_node(
                     },
                     ("sync", Payload::SyncData { path, data }) => {
                         let targets: Vec<String> = state.active_peers.lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect();
-                        
                         for peer_str in targets {
                             if let Ok(peer) = peer_str.parse::<PeerId>() {
                                 swarm.behaviour_mut().request_response.send_request(
@@ -151,7 +208,7 @@ pub async fn start_p2p_node(
                         }
                     },
                     ("request_sync", Payload::RequestSync { path }) => {
-                        let targets: Vec<String> = state.active_peers.lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect();
+                         let targets: Vec<String> = state.active_peers.lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect();
                          for peer_str in targets {
                             if let Ok(peer) = peer_str.parse::<PeerId>() {
                                 swarm.behaviour_mut().request_response.send_request(
@@ -197,7 +254,8 @@ pub async fn start_p2p_node(
                         state.local_addrs.lock().unwrap_or_else(|e| e.into_inner()).push(addr_str.clone());
                         let _ = app_handle.emit("new-listen-addr", addr_str.clone());
                         
-                        if addr_str.contains("0.0.0.0") {
+                        // If it's the simple 0.0.0.0 address, try to announce LAN IP
+                        if addr_str.contains("0.0.0.0") && !addr_str.contains("p2p-circuit") {
                             if let Some(lan_ip) = get_local_ip() {
                                 let fixed_addr = addr_str.replace("0.0.0.0", &lan_ip.to_string());
                                 println!("Announcing LAN Addr: {}", fixed_addr);
@@ -206,6 +264,13 @@ pub async fn start_p2p_node(
                                 let _ = app_handle.emit("new-listen-addr", fixed_addr);
                             }
                         }
+                    },
+                    SwarmEvent::Behaviour(MyBehaviourEvent::RelayClient(relay_client::Event::ReservationReqAccepted { .. })) => {
+                        println!("Relay accepted our reservation! We are now reachable via the relay.");
+                    },
+                    // FIXED: dcutr::Event is a struct with fields `remote_peer_id` and `result`, not an enum variant.
+                    SwarmEvent::Behaviour(MyBehaviourEvent::Dcutr(dcutr::Event { remote_peer_id, result: Ok(_) })) => {
+                        println!("HOLE PUNCH SUCCESS! Connected directly to {}", remote_peer_id);
                     },
                     SwarmEvent::Behaviour(MyBehaviourEvent::RequestResponse(request_response::Event::Message { 
                         peer, message: request_response::Message::Request { request, channel, .. }, ..
