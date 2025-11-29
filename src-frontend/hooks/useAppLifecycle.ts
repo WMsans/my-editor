@@ -7,7 +7,7 @@ interface UseAppLifecycleProps {
   sshKeyPathRef: React.MutableRefObject<string>;
   isHostRef: React.MutableRefObject<boolean>;
   setWarningMsg: (msg: string | null) => void;
-  connectedPeersRef: React.MutableRefObject<number>; // Add Ref for peers
+  connectedPeersRef: React.MutableRefObject<number>;
 }
 
 export function useAppLifecycle({
@@ -32,24 +32,33 @@ export function useAppLifecycle({
         try {
           // If we are host, push changes.
           if (isHostRef.current) {
-             // LOGIC FIX:
-             // 1. If we are ALONE (connectedPeers == 0), we wipe the hostId.
-             //    This ensures the repo is "clean" for the next session.
-             // 2. If we have GUESTS (connectedPeers > 0), we DO NOT touch the meta file.
-             //    We let the guests detect the disconnect, claim host, and write their own ID.
-             //    This prevents the race condition/git conflict where we write "null" 
-             //    while they write "newHost".
              if (connectedPeersRef.current === 0) {
                  const sep = currentRoot.includes("\\") ? "\\" : "/";
                  const metaPath = `${currentRoot}${sep}.collab_meta.json`;
                  try {
-                     const meta = { hostId: null, hostAddrs: [] };
+                     // [CHANGED] Read existing file to preserve security token
+                     let existingMeta: any = {};
+                     try {
+                        const existingBytes = await invoke<number[]>("read_file_content", { path: metaPath });
+                        const existingStr = new TextDecoder().decode(new Uint8Array(existingBytes));
+                        existingMeta = JSON.parse(existingStr);
+                     } catch(e) { 
+                        console.log("Could not read meta file to preserve key", e);
+                     }
+
+                     const meta = { 
+                        hostId: null, 
+                        hostAddrs: [],
+                        encrypted: existingMeta.encrypted || false, // Preserve encrypted flag
+                        securityCheck: existingMeta.securityCheck || "" // [FIX] Preserve the encrypted token
+                     };
+
                      const content = new TextEncoder().encode(JSON.stringify(meta, null, 2));
                      await invoke("write_file_content", { 
                         path: metaPath, 
                         content: Array.from(content) 
                      });
-                     console.log("Wiped host ID (Session ended alone).");
+                     console.log("Wiped host ID (Session ended alone), preserved security settings.");
                  } catch (e) {
                      console.error("Failed to wipe host ID:", e);
                  }

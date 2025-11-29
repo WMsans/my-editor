@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 const META_FILE = ".collab_meta.json";
+const VALIDATION_TOKEN = "COLLAB_ACCESS_GRANTED_V1";
 
 // --- Simple Crypto Helpers ---
 const ENC = new TextEncoder();
@@ -49,7 +50,7 @@ interface UseHostNegotiationProps {
   sendJoinRequest: (peerId: string, addrs: string[]) => void;
   setStatus: (status: string) => void;
   setWarningMsg: (msg: string | null) => void;
-  requestPassword: (msg: string) => Promise<string | null>; // [NEW] Callback
+  requestPassword: (msg: string) => Promise<string | null>;
 }
 
 export function useHostNegotiation({
@@ -65,10 +66,60 @@ export function useHostNegotiation({
   sendJoinRequest,
   setStatus,
   setWarningMsg,
-  requestPassword // [NEW] Destructured
+  requestPassword
 }: UseHostNegotiationProps) {
 
   const isNegotiatingRef = useRef(false);
+
+  // Function to update the key, write file, and push
+  const updateProjectKey = async (newKey: string) => {
+    if (!rootPath || !myPeerId) return;
+    
+    setStatus("Updating project key...");
+    const sep = rootPath.includes("\\") ? "\\" : "/";
+    const metaPath = `${rootPath}${sep}${META_FILE}`;
+    const ssh = sshKeyPathRef.current || "";
+
+    try {
+        let storedAddrs: any = myAddresses;
+        let securityCheck = "";
+        
+        // Encrypt with the NEW key
+        if (newKey) {
+            try {
+                // 1. Encrypt Addresses
+                storedAddrs = await encryptData(JSON.stringify(myAddresses), newKey);
+                // 2. Create Validation Token (Encrypt the static string)
+                securityCheck = await encryptData(VALIDATION_TOKEN, newKey);
+            } catch (e) {
+                console.error("Encryption failed:", e);
+                setWarningMsg("Failed to encrypt data.");
+                return;
+            }
+        }
+
+        const metaObj = { 
+            hostId: myPeerId, 
+            hostAddrs: storedAddrs,
+            encrypted: !!newKey,
+            securityCheck: securityCheck 
+        };
+
+        const content = new TextEncoder().encode(JSON.stringify(metaObj, null, 2));
+        await invoke("write_file_content", { 
+            path: metaPath, 
+            content: Array.from(content)
+        });
+
+        setEncryptionKey(newKey);
+        encryptionKeyRef.current = newKey;
+
+        await invoke("push_changes", { path: rootPath, sshKeyPath: ssh });
+        setStatus("Key updated & pushed.");
+    } catch (e: any) {
+        setWarningMsg(`Failed to update key: ${e.toString()}`);
+    }
+  };
 
   const negotiateHost = async (retryCount = 0) => {
     if (!rootPath || !myPeerId) return;
@@ -93,6 +144,7 @@ export function useHostNegotiation({
         let metaHost = "";
         let metaAddrs: string[] = [];
         let isEncrypted = false;
+        let securityCheck = "";
 
         try {
             const contentBytes = await invoke<number[]>("read_file_content", { path: metaPath });
@@ -101,46 +153,70 @@ export function useHostNegotiation({
             
             metaHost = json.hostId;
             isEncrypted = json.encrypted || false;
+            securityCheck = json.securityCheck || "";
 
             if (isEncrypted) {
                 let decrypted = false;
+                
+                // 1. Try already active key
                 let currentKey = encryptionKeyRef.current;
-
-                // 1. Try currently saved key first (silent attempt)
+                
                 if (currentKey) {
                     try {
-                        const decryptedJsonStr = await decryptData(json.hostAddrs, currentKey);
-                        metaAddrs = JSON.parse(decryptedJsonStr);
-                        decrypted = true;
-                    } catch (e) {
-                        console.log("Current encryption key failed.");
+                        const val = await decryptData(securityCheck, currentKey);
+                        if (val === VALIDATION_TOKEN) {
+                             // [FIX] Check if hostAddrs is a string before decrypting
+                             if (json.hostAddrs && typeof json.hostAddrs === 'string') {
+                                const decryptedJsonStr = await decryptData(json.hostAddrs, currentKey);
+                                metaAddrs = JSON.parse(decryptedJsonStr);
+                             } else {
+                                metaAddrs = []; // Default to empty if wiped
+                             }
+                             decrypted = true;
+                        }
+                    } catch (e) { 
+                        console.log("Current encryption key invalid or stale."); 
+                        setEncryptionKey("");
+                        encryptionKeyRef.current = "";
                     }
                 }
 
-                // 2. Loop until decrypted or cancelled
+                // 2. If not decrypted, prompt user
                 let retryMessage = "";
                 while (!decrypted) {
-                    const msg = retryMessage || "This project has encrypted IP addresses.\nPlease enter the decryption key:";
-                    
-                    // Call the Modal via Promise
+                    const msg = retryMessage || "🔒 Project Encrypted.\nPlease enter the decryption key:";
                     const userInput = await requestPassword(msg);
                     
                     if (userInput === null) {
                         setStatus("Decryption cancelled. Offline.");
-                        return; // Exit completely
+                        return; 
                     }
                     
                     try {
-                        const decryptedJsonStr = await decryptData(json.hostAddrs, userInput);
-                        metaAddrs = JSON.parse(decryptedJsonStr);
-                        decrypted = true;
+                        const val = await decryptData(securityCheck, userInput);
                         
-                        // Success! Update global state
-                        setEncryptionKey(userInput); 
-                        encryptionKeyRef.current = userInput; 
+                        if (val === VALIDATION_TOKEN) {
+                            // [FIX] Check if hostAddrs is a string before decrypting
+                            if (json.hostAddrs && typeof json.hostAddrs === 'string') {
+                                try {
+                                    const decryptedJsonStr = await decryptData(json.hostAddrs, userInput);
+                                    metaAddrs = JSON.parse(decryptedJsonStr);
+                                } catch (e) {
+                                    console.warn("Could not decrypt addresses (likely invalid format), defaulting to empty.");
+                                    metaAddrs = [];
+                                }
+                            } else {
+                                metaAddrs = []; // Default to empty if wiped/array
+                            }
+
+                            decrypted = true;
+                            setEncryptionKey(userInput); 
+                            encryptionKeyRef.current = userInput; 
+                        } else {
+                            throw new Error("Validation mismatch");
+                        }
                     } catch (e) {
                         retryMessage = "⛔ Incorrect key. Please try again.";
-                        // Loop continues...
                     }
                 }
             } else {
@@ -156,7 +232,6 @@ export function useHostNegotiation({
                 console.log("Ignoring disconnected host ID in meta file.");
             } else {
                 if (!isHost) return;
-
                 setStatus(`Found host ${metaHost.slice(0,8)}. Joining...`);
                 isAutoJoiningRef.current = true; 
                 sendJoinRequest(metaHost, metaAddrs || []);
@@ -177,14 +252,17 @@ export function useHostNegotiation({
 
         // WRITE LOGIC
         let storedAddrs: any = myAddresses;
-        let encryptedFlag = false;
-        
-        if (encryptionKeyRef.current) {
+        let storedCheck: any = securityCheck;
+        const activeKey = encryptionKeyRef.current;
+        const isSecure = !!activeKey;
+
+        if (isSecure) {
             try {
-                storedAddrs = await encryptData(JSON.stringify(myAddresses), encryptionKeyRef.current);
-                encryptedFlag = true;
+                storedAddrs = await encryptData(JSON.stringify(myAddresses), activeKey);
+                // Ensure we write the security check too
+                storedCheck = await encryptData(VALIDATION_TOKEN, activeKey);
             } catch (e) {
-                console.error("Encryption failed:", e);
+                console.error("Encryption failed during save:", e);
                 setWarningMsg("Failed to encrypt IP addresses. Saving unencrypted.");
             }
         }
@@ -192,7 +270,8 @@ export function useHostNegotiation({
         const metaObj = { 
             hostId: myPeerId, 
             hostAddrs: storedAddrs,
-            encrypted: encryptedFlag 
+            encrypted: isSecure,
+            securityCheck: storedCheck 
         };
 
         const content = new TextEncoder().encode(JSON.stringify(metaObj, null, 2));
@@ -238,5 +317,5 @@ export function useHostNegotiation({
     prevIsHost.current = isHost;
   }, [isHost, rootPath]);
 
-  return { negotiateHost };
+  return { negotiateHost, updateProjectKey };
 }

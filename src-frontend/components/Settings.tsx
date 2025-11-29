@@ -6,7 +6,7 @@ interface SettingsProps {
   sshKeyPath: string;
   setSshKeyPath: (path: string) => void;
   encryptionKey: string;
-  setEncryptionKey: (key: string) => void;
+  updateProjectKey: (key: string) => void; // [CHANGED] Replaced setEncryptionKey
   detectedRemote: string;
 }
 
@@ -16,7 +16,7 @@ export const Settings: React.FC<SettingsProps> = ({
   sshKeyPath,
   setSshKeyPath,
   encryptionKey,
-  setEncryptionKey,
+  updateProjectKey,
   detectedRemote
 }) => {
   // Local state for deferred saving
@@ -44,7 +44,10 @@ export const Settings: React.FC<SettingsProps> = ({
 
   const handleSave = () => {
     setSshKeyPath(localSshPath);
-    setEncryptionKey(localEncKey);
+    // [CHANGED] Use the update handler which triggers re-encryption and push
+    if (localEncKey !== encryptionKey) {
+        updateProjectKey(localEncKey);
+    }
     onClose();
   };
 
@@ -67,10 +70,10 @@ export const Settings: React.FC<SettingsProps> = ({
         </div>
 
         <div className="setting-group">
-          <label>IP Encryption Key (Optional)</label>
+          <label>Project Encryption Key</label>
           <div className="row">
             <input 
-              type="password" 
+              type="text" // Changed to text so user can see the key they are setting
               value={localEncKey} 
               onChange={(e) => setLocalEncKey(e.target.value)} 
               placeholder="Enter secret key..."
@@ -78,7 +81,8 @@ export const Settings: React.FC<SettingsProps> = ({
             <button onClick={generateKey} style={{ whiteSpace: 'nowrap' }}>Generate</button>
           </div>
           <small>
-            If set, your IP address in the project file will be encrypted.
+            This key will be stored in the project file and used to encrypt your IP address.
+            Changing this will immediately push a new meta file to the remote.
           </small>
         </div>
 

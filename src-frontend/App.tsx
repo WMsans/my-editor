@@ -14,7 +14,7 @@ import { useEditorManager } from "./hooks/useEditorManager";
 import { MenuBar } from "./components/MenuBar";
 import { Settings } from "./components/Settings";
 import { WarningModal } from "./components/WarningModal";
-import { PasswordModal } from "./components/PasswordModal"; // [NEW]
+import { PasswordModal } from "./components/PasswordModal"; 
 import { Sidebar } from "./components/Sidebar";
 import { EditorArea } from "./components/EditorArea";
 import "./App.css";
@@ -32,12 +32,12 @@ function App() {
   } | null>(null);
 
   // --- Encryption State ---
-  const [encryptionKey, setEncryptionKey] = useState(localStorage.getItem("encryptionKey") || "");
+  // [CHANGED] Removed localStorage default. Key is now project-lifecycle dependent.
+  const [encryptionKey, setEncryptionKey] = useState("");
   const encryptionKeyRef = useRef(encryptionKey);
   
   useEffect(() => {
     encryptionKeyRef.current = encryptionKey;
-    localStorage.setItem("encryptionKey", encryptionKey);
   }, [encryptionKey]);
 
   // --- Project & File System Hook ---
@@ -51,6 +51,11 @@ function App() {
     handleOpenFolder, handleNewFile, handleProjectReceived,
     getRelativePath
   } = useProject(setWarningMsg);
+
+  // Clear key when switching projects
+  useEffect(() => {
+      setEncryptionKey(""); 
+  }, [rootPath]);
 
   // --- P2P Callbacks ---
   const handleHostDisconnect = useCallback((hostId: string) => {
@@ -105,7 +110,7 @@ function App() {
   };
 
   // --- Host Negotiation Hook ---
-  useHostNegotiation({
+  const { updateProjectKey } = useHostNegotiation({
     rootPath,
     myPeerId,
     myAddresses,
@@ -118,7 +123,7 @@ function App() {
     sendJoinRequest,
     setStatus,
     setWarningMsg,
-    requestPassword // Pass the callback
+    requestPassword
   });
 
   // --- App Lifecycle Hook ---
@@ -200,11 +205,12 @@ function App() {
         sshKeyPath={sshKeyPath}
         setSshKeyPath={setSshKeyPath}
         encryptionKey={encryptionKey}
-        setEncryptionKey={setEncryptionKey}
+        // [CHANGED] Pass the update handler instead of raw setter
+        updateProjectKey={updateProjectKey}
         detectedRemote={detectedRemote}
       />
 
-      {/* New Password Modal */}
+      {/* Password Modal */}
       <PasswordModal 
         isOpen={!!passwordRequest}
         message={passwordRequest?.message || ""}
