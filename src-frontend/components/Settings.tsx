@@ -6,7 +6,8 @@ interface SettingsProps {
   sshKeyPath: string;
   setSshKeyPath: (path: string) => void;
   encryptionKey: string;
-  updateProjectKey: (key: string) => void; // [CHANGED] Replaced setEncryptionKey
+  // Fix: Allow Dispatch<SetStateAction<string>> compatibility
+  setEncryptionKey: (key: string) => void; 
   detectedRemote: string;
 }
 
@@ -16,14 +17,12 @@ export const Settings: React.FC<SettingsProps> = ({
   sshKeyPath,
   setSshKeyPath,
   encryptionKey,
-  updateProjectKey,
+  setEncryptionKey,
   detectedRemote
 }) => {
-  // Local state for deferred saving
   const [localSshPath, setLocalSshPath] = useState(sshKeyPath);
   const [localEncKey, setLocalEncKey] = useState(encryptionKey);
 
-  // Reset local state when opening
   useEffect(() => {
     if (isOpen) {
       setLocalSshPath(sshKeyPath);
@@ -44,10 +43,7 @@ export const Settings: React.FC<SettingsProps> = ({
 
   const handleSave = () => {
     setSshKeyPath(localSshPath);
-    // [CHANGED] Use the update handler which triggers re-encryption and push
-    if (localEncKey !== encryptionKey) {
-        updateProjectKey(localEncKey);
-    }
+    setEncryptionKey(localEncKey);
     onClose();
   };
 
@@ -64,26 +60,21 @@ export const Settings: React.FC<SettingsProps> = ({
             onChange={(e) => setLocalSshPath(e.target.value)} 
             placeholder="/Users/username/.ssh/id_rsa"
           />
-          <small>
-            Leave empty to use <code>~/.ssh/config</code> or SSH Agent.
-          </small>
+          <small>Leave empty to use <code>~/.ssh/config</code> or SSH Agent.</small>
         </div>
 
         <div className="setting-group">
-          <label>Project Encryption Key</label>
+          <label>IP Encryption Key (Optional)</label>
           <div className="row">
             <input 
-              type="text" // Changed to text so user can see the key they are setting
+              type="password" 
               value={localEncKey} 
               onChange={(e) => setLocalEncKey(e.target.value)} 
               placeholder="Enter secret key..."
             />
             <button onClick={generateKey} style={{ whiteSpace: 'nowrap' }}>Generate</button>
           </div>
-          <small>
-            This key will be stored in the project file and used to encrypt your IP address.
-            Changing this will immediately push a new meta file to the remote.
-          </small>
+          <small>If set, your IP address in the project file will be encrypted.</small>
         </div>
 
         {detectedRemote && (

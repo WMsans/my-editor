@@ -3,6 +3,10 @@ import * as Y from "yjs";
 import { invoke } from "@tauri-apps/api/core"; 
 import { documentRegistry } from "./mod-engine/DocumentRegistry"; 
 
+// API & Registry
+import { registry } from "./mod-engine/Registry";
+import { createHostAPI } from "./mod-engine/HostAPIImpl";
+
 // Logic Hooks
 import { useP2P } from "./hooks/useP2P";
 import { useHostNegotiation } from "./hooks/useHostNegotiation";
@@ -14,7 +18,7 @@ import { useEditorManager } from "./hooks/useEditorManager";
 import { MenuBar } from "./components/MenuBar";
 import { Settings } from "./components/Settings";
 import { WarningModal } from "./components/WarningModal";
-import { PasswordModal } from "./components/PasswordModal"; 
+import { PasswordModal } from "./components/PasswordModal";
 import { Sidebar } from "./components/Sidebar";
 import { EditorArea } from "./components/EditorArea";
 import "./App.css";
@@ -32,12 +36,12 @@ function App() {
   } | null>(null);
 
   // --- Encryption State ---
-  // [CHANGED] Removed localStorage default. Key is now project-lifecycle dependent.
-  const [encryptionKey, setEncryptionKey] = useState("");
+  const [encryptionKey, setEncryptionKey] = useState(localStorage.getItem("encryptionKey") || "");
   const encryptionKeyRef = useRef(encryptionKey);
   
   useEffect(() => {
     encryptionKeyRef.current = encryptionKey;
+    localStorage.setItem("encryptionKey", encryptionKey);
   }, [encryptionKey]);
 
   // --- Project & File System Hook ---
@@ -51,11 +55,6 @@ function App() {
     handleOpenFolder, handleNewFile, handleProjectReceived,
     getRelativePath
   } = useProject(setWarningMsg);
-
-  // Clear key when switching projects
-  useEffect(() => {
-      setEncryptionKey(""); 
-  }, [rootPath]);
 
   // --- P2P Callbacks ---
   const handleHostDisconnect = useCallback((hostId: string) => {
@@ -110,7 +109,7 @@ function App() {
   };
 
   // --- Host Negotiation Hook ---
-  const { updateProjectKey } = useHostNegotiation({
+  useHostNegotiation({
     rootPath,
     myPeerId,
     myAddresses,
@@ -146,6 +145,23 @@ function App() {
     isJoining,
     requestSync
   );
+
+  // --- [NEW] API & Plugin Initialization ---
+  const editorRef = useRef(editor);
+  useEffect(() => { editorRef.current = editor; }, [editor]);
+
+  useEffect(() => {
+    // Initialize the API only once (or when dependencies that matter change)
+    // We pass a getter for editor so the API always gets the fresh instance
+    const api = createHostAPI(() => editorRef.current, setWarningMsg);
+    
+    // Expose globally
+    // @ts-ignore
+    window.CollabAPI = api;
+
+    // Initialize Registry with API (activates registered plugins)
+    registry.init(api);
+  }, [setWarningMsg]); // Deps: mainly stable functions
 
   useEffect(() => { setIsSyncingRef.current = setIsSyncing; }, [setIsSyncing]);
   useEffect(() => { if (showSettings) refreshRemoteOrigin(); }, [showSettings, refreshRemoteOrigin]);
@@ -205,12 +221,10 @@ function App() {
         sshKeyPath={sshKeyPath}
         setSshKeyPath={setSshKeyPath}
         encryptionKey={encryptionKey}
-        // [CHANGED] Pass the update handler instead of raw setter
-        updateProjectKey={updateProjectKey}
+        setEncryptionKey={setEncryptionKey}
         detectedRemote={detectedRemote}
       />
 
-      {/* Password Modal */}
       <PasswordModal 
         isOpen={!!passwordRequest}
         message={passwordRequest?.message || ""}
