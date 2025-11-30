@@ -1,0 +1,27 @@
+{
+  "id": "simulation-block",
+  "name": "Simulation Container",
+  "version": "1.0.0",
+  "description": "A Turing-complete JavaScript sandbox for the editor.",
+  "author": "User",
+  "main": "index.tsx",
+  "activationEvents": [
+    "onStartup" 
+  ],
+  "contributes": {
+    "slashMenu": [
+      {
+        "command": "simulation.insert",
+        "title": "Simulation Node",
+        "description": "Insert a JS Canvas Sandbox"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "simulation.run",
+        "key": "Ctrl+Enter",
+        "when": "editorTextFocus && inSimulationBlock"
+      }
+    ]
+  }
+}

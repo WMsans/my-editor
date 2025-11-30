@@ -1,46 +1,45 @@
-import { Mod, Plugin, SidebarTab, HostAPI } from "./types";
+import { Mod, SidebarTab, HostAPI } from "./types";
+
+interface SlashCommandDef {
+    id: string; // Plugin ID
+    command: string; // e.g., "simulation.insert"
+    title: string;
+    description: string;
+}
 
 class Registry {
-  // Existing "Mods" (Tiptap Blocks)
-  private mods: Map<string, Mod> = new Map();
+  // Tiptap Extensions (gathered during plugin loading)
+  private dynamicExtensions: any[] = [];
   
-  // New Plugin System
-  private plugins: Map<string, Plugin> = new Map();
+  // UI Elements
   private sidebarTabs: SidebarTab[] = [];
+  private slashCommands: SlashCommandDef[] = [];
   
-  // Initialization State
   private api: HostAPI | null = null;
 
-  // --- Mod/Block Methods ---
-  register(mod: Mod) {
-    this.mods.set(mod.id, mod);
+  init(api: HostAPI) {
+    this.api = api;
   }
 
-  getAll(): Mod[] {
-    return Array.from(this.mods.values());
+  // --- Extension Management ---
+  registerExtension(ext: any) {
+    this.dynamicExtensions.push(ext);
   }
 
   getExtensions() {
-    return Array.from(this.mods.values()).map(m => m.extension);
+    return this.dynamicExtensions;
   }
 
-  // --- Plugin Methods ---
-  
-  // Called by App.tsx once to provide the implementation
-  init(api: HostAPI) {
-    this.api = api;
-    // Activate any plugins registered before init
-    this.plugins.forEach(p => p.activate(api));
+  // --- Slash Menu Management ---
+  registerSlashCommand(cmd: SlashCommandDef) {
+    this.slashCommands.push(cmd);
   }
 
-  registerPlugin(plugin: Plugin) {
-    this.plugins.set(plugin.id, plugin);
-    if (this.api) {
-      plugin.activate(this.api);
-    }
+  getAllSlashCommands() {
+    return this.slashCommands;
   }
 
-  // --- Sidebar Methods ---
+  // --- Sidebar Management ---
   registerSidebarTab(tab: SidebarTab) {
     this.sidebarTabs.push(tab);
   }

@@ -6,6 +6,7 @@ import { documentRegistry } from "./mod-engine/DocumentRegistry";
 // API & Registry
 import { registry } from "./mod-engine/Registry";
 import { createHostAPI } from "./mod-engine/HostAPIImpl";
+import { pluginLoader } from "./mod-engine/PluginLoader";
 
 // Logic Hooks
 import { useP2P } from "./hooks/useP2P";
@@ -38,6 +39,41 @@ function App() {
   // --- Encryption State ---
   const [encryptionKey, setEncryptionKey] = useState(localStorage.getItem("encryptionKey") || "");
   const encryptionKeyRef = useRef(encryptionKey);
+
+  // --- App Lifecycle State ---
+  const [isAppReady, setIsAppReady] = useState(false);
+  const [loadError, setLoadError] = useState<string|null>(null);
+
+  useEffect(() => {
+    const initEngine = async () => {
+      try {
+        // A. Setup Host API (mock editor for now, will link real one later)
+        // We need a stable reference to the editor getter, which will work once EditorArea mounts
+        const api = createHostAPI(() => editorRef.current, setWarningMsg);
+        // @ts-ignore
+        window.CollabAPI = api;
+        registry.init(api);
+
+        // B. Discover & Load Plugins
+        // Assuming your 'plugins' folder is at the root of the app execution context
+        const pluginsDir = "plugins"; 
+        const manifests = await pluginLoader.discoverPlugins(pluginsDir);
+        await pluginLoader.loadPlugins(api, manifests);
+
+        // C. Ready
+        setIsAppReady(true);
+      } catch (e: any) {
+        setLoadError(e.toString());
+      }
+    };
+
+    initEngine();
+
+    // Cleanup
+    return () => {
+      pluginLoader.deactivateAll();
+    };
+  }, []);
   
   useEffect(() => {
     encryptionKeyRef.current = encryptionKey;
@@ -203,6 +239,16 @@ function App() {
         setWarningMsg(`Failed to save file: ${e.toString()}`);
     }
   };
+
+  if (!isAppReady) {
+    return (
+      <div className="app-loading">
+        <h2>Initializing Collaboration Engine...</h2>
+        {loadError && <p style={{color: 'red'}}>Error: {loadError}</p>}
+        <div className="loader">Loading Plugins...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="app-layout">

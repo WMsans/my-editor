@@ -4,10 +4,8 @@ import Collaboration from "@tiptap/extension-collaboration";
 import { Markdown } from "@tiptap/markdown";
 import BubbleMenuExtension from "@tiptap/extension-bubble-menu"; 
 import * as Y from "yjs";
-import { useEffect } from "react";
 
 import { registry } from "../mod-engine/Registry";
-import "../mods/SimulationBlock"; 
 
 export function useCollaborativeEditor(doc: Y.Doc | null) {
   const editor = useEditor({
@@ -19,7 +17,7 @@ export function useCollaborativeEditor(doc: Y.Doc | null) {
       Collaboration.configure({ document: doc || new Y.Doc() }),
       Markdown,
       BubbleMenuExtension,
-      ...registry.getExtensions()
+      ...registry.getExtensions() // This now handles the dynamic plugins
     ],
     editorProps: { attributes: { class: "editor-content" } },
   }, [doc]);

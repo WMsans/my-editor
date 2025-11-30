@@ -11,7 +11,7 @@ export const SlashMenu: React.FC<SlashMenuProps> = ({ editor }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const items = registry.getAll();
+  const items = registry.getAllSlashCommands();
 
   useEffect(() => {
     const handleUpdate = () => {
@@ -42,17 +42,15 @@ export const SlashMenu: React.FC<SlashMenuProps> = ({ editor }) => {
     return () => { editor.off("transaction", handleUpdate); };
   }, [editor]);
 
-  const executeCommand = (modId: string) => {
+  const executeCommand = (cmd: any) => {
     // Delete the "/"
     editor.commands.deleteRange({ from: editor.state.selection.from - 1, to: editor.state.selection.from });
     
-    if (modId === 'simulation') {
+    if (cmd.command === 'simulation.insert') {
       editor.commands.insertContent({ type: 'simulationBlock' });
     }
-    // Add logic for other block types here
     
     setIsOpen(false);
-    editor.chain().focus().run();
   };
 
   if (!isOpen) return null;
@@ -70,7 +68,7 @@ export const SlashMenu: React.FC<SlashMenuProps> = ({ editor }) => {
           onClick={() => executeCommand(mod.id)}
           onMouseEnter={() => setSelectedIndex(index)}
         >
-          <strong>{mod.name}</strong>
+          <strong>{mod.title}</strong>
           <small>{mod.description}</small>
         </button>
       ))}

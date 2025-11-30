@@ -1,29 +1,22 @@
-// src-frontend/mods/SimulationBlock.tsx
-import { NodeViewWrapper } from "@tiptap/react";
-import React, { useEffect, useRef, useState } from "react";
-import { Node, mergeAttributes } from "@tiptap/core";
-import { ReactNodeViewRenderer } from "@tiptap/react";
-import { registry } from "../mod-engine/Registry";
+import React, { useEffect, useRef, useState } from "react"; // Provided by Host
+import { NodeViewWrapper, ReactNodeViewRenderer } from "@tiptap/react"; // Provided by Host
+import { Node, mergeAttributes } from "@tiptap/core"; // Provided by Host
 
-// 1. The React Component
+// --- 1. The Component (Logic) ---
 const SimulationComponent = (props: any) => {
-  // Use default if code is null
   const defaultCode = "// Draw something cool\nconst ctx = canvas.getContext('2d');\nctx.fillStyle = 'red';\nctx.fillRect(10, 10, 50, 50);";
   
   const [code, setCode] = useState(props.node.attrs.code || defaultCode);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Sync from Tiptap attributes (Collaboration/Peers) to local state
   useEffect(() => {
     const currentAttr = props.node.attrs.code;
-    // If attribute is not null (modified) and different from local state, update local state
     if (currentAttr !== null && currentAttr !== code) {
       setCode(currentAttr);
     }
-  }, [props.node.attrs.code, code]);
+  }, [props.node.attrs.code]);
 
-  // Handle typing: Update local state AND Tiptap attributes
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newCode = e.target.value;
     setCode(newCode);
@@ -33,16 +26,12 @@ const SimulationComponent = (props: any) => {
   const runCode = () => {
     if (!canvasRef.current) return;
     const canvas = canvasRef.current;
-    // Clear canvas
     canvas.width = canvas.width; 
     
     try {
-      // DANGER: Eval is used for "Turing Completeness". 
-      // In a real app, use a sandboxed iframe or QuickJS-wasm.
       const func = new Function("canvas", "console", code);
       func(canvas, { log: console.log });
       setError(null);
-      // Ensure attributes are consistent (though handleChange handles it mostly)
       props.updateAttributes({ code });
     } catch (e: any) {
       setError(e.message);
@@ -60,7 +49,7 @@ const SimulationComponent = (props: any) => {
           value={code} 
           onChange={handleChange}
           spellCheck={false}
-          onKeyDown={(e) => e.stopPropagation()} // Prevent editor shortcuts
+          onKeyDown={(e) => e.stopPropagation()} 
         />
         <div className="canvas-wrapper">
            <canvas ref={canvasRef} width={300} height={200} />
@@ -71,17 +60,15 @@ const SimulationComponent = (props: any) => {
   );
 };
 
-// 2. The Tiptap Node Definition
-export const SimulationNode = Node.create({
+// --- 2. The Tiptap Extension Definition ---
+const SimulationNode = Node.create({
   name: 'simulationBlock',
   group: 'block',
-  atom: true, // It's a single unit, not a text container
+  atom: true,
 
   addAttributes() {
     return {
-      code: {
-        default: null,
-      },
+      code: { default: null },
     };
   },
 
@@ -98,11 +85,23 @@ export const SimulationNode = Node.create({
   },
 });
 
-// 3. Register the Mod
-registry.register({
-  id: "simulation",
-  name: "Simulation Container",
-  description: "A Turing-complete JS sandbox",
-  extension: SimulationNode,
-  component: SimulationComponent
-});
+// --- 3. The Activation Hook (The New Entry Point) ---
+// This replaces 'registry.register' calls.
+export function activate(context: any) {
+  // 1. Register the Editor Extension (The Block)
+  context.editor.registerExtension(SimulationNode);
+
+  // 2. Register the Command (Linked to plugin.json "slashMenu")
+  context.commands.registerCommand("simulation.insert", () => {
+    const editor = context.editor.getSafeInstance();
+    if (editor) {
+      editor.chain().focus().insertContent({ type: 'simulationBlock' }).run();
+    }
+  });
+
+  console.log("Simulation Plugin Activated!");
+}
+
+export function deactivate() {
+  // Optional cleanup
+}

@@ -23,33 +23,41 @@ export interface Mod {
 
 export interface SidebarTab {
   id: string;
-  icon: string; // Emoji or simple text for now
+  icon: string;
   label: string;
   component: React.FC<any>;
 }
 
 export interface HostAPI {
   editor: {
-    getCommands: () => Editor["commands"] | null;
-    getState: () => EditorState | null;
+    // We added 'registerExtension' to the API for plugins to use
     registerExtension: (ext: Node | Extension) => void;
+    // Helper to insert content
+    insertContent: (content: any) => void; 
+    getSafeInstance: () => Editor | null;
+  };
+  commands: {
+    registerCommand: (id: string, callback: () => void) => void;
   };
   ui: {
     registerSidebarTab: (tab: SidebarTab) => void;
-    showNotification: (msg: string) => void;
-  };
-  data: {
-    getDoc: () => Y.Doc;
-    getMap: <T = any>(name: string) => Y.Map<T>;
-    fs: {
-      readFile: (path: string) => Promise<number[]>;
-      writeFile: (path: string, content: number[]) => Promise<void>;
-    };
   };
 }
 
-export interface Plugin {
+// --- NEW: Plugin System Types ---
+
+export interface PluginManifest {
   id: string;
   name: string;
-  activate: (api: HostAPI) => void;
+  version: string;
+  main: string; // e.g. "index.js"
+  contributes?: {
+    slashMenu?: Array<{ command: string; title: string; description: string }>;
+  };
+}
+
+export interface ActivePlugin {
+  manifest: PluginManifest;
+  instance: any; // The exported module
+  cleanup?: () => void;
 }
