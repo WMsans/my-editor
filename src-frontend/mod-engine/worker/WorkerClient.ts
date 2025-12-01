@@ -23,6 +23,14 @@ export class WorkerClient {
         this.worker.postMessage(msg);
     }
 
+    deactivatePlugin(pluginId: string) {
+        const msg: WorkerMessage = {
+            type: 'DEACTIVATE',
+            payload: { pluginId }
+        };
+        this.worker.postMessage(msg);
+    }
+
     private async handleMessage(e: MessageEvent<MainMessage>) {
         const { type, payload } = e.data;
 

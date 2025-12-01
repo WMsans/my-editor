@@ -104,7 +104,11 @@ class PluginLoaderService {
 
          this.activePlugins.set(manifest.id, {
              manifest,
-             instance: { /* Placeholder for worker plugin */ }
+             instance: { 
+                 deactivate: () => {
+                     this.workerClient?.deactivatePlugin(manifest.id);
+                 }
+             }
          });
       }
       else{

@@ -3,6 +3,7 @@ import { WorkerMessage, MainMessage, ApiRequestPayload, ApiResponsePayload } fro
 // --- State ---
 const commandHandlers = new Map<string, Function>();
 const pendingRequests = new Map<string, { resolve: Function, reject: Function }>();
+const activeWorkerPlugins = new Map<string, any>();
 
 // --- Helper: Send to Main ---
 const postToMain = (msg: MainMessage) => {
@@ -81,6 +82,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 const runPlugin = new Function("exports", "require", "module", "api", code);
                 runPlugin(exports, syntheticRequire, module, api);
 
+                activeWorkerPlugins.set(pluginId, exports);
+
                 if (exports.activate) {
                     await exports.activate(api);
                     postToMain({ type: 'LOG', payload: { level: 'info', message: `Worker Plugin '${pluginId}' activated.` } });
@@ -88,6 +91,21 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             } catch (err: any) {
                 postToMain({ type: 'LOG', payload: { level: 'error', message: `Worker Init Error (${pluginId}): ${err.toString()}` } });
             }
+            break;
+        }
+
+        case 'DEACTIVATE': {
+            const { pluginId } = payload;
+            const instance = activeWorkerPlugins.get(pluginId);
+            if (instance && instance.deactivate) {
+                try {
+                    await instance.deactivate();
+                    postToMain({ type: 'LOG', payload: { level: 'info', message: `Worker Plugin '${pluginId}' deactivated.` } });
+                } catch (e: any) {
+                    console.error(`Error deactivating ${pluginId}:`, e);
+                }
+            }
+            activeWorkerPlugins.delete(pluginId);
             break;
         }
 
