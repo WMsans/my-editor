@@ -19,14 +19,9 @@ export const createHostAPI = (
       getCommands: () => getEditor()?.commands || null,
       getState: () => getEditor()?.state || null,
       registerExtension: (ext) => {
-        // Dynamic extension registration is tricky in Tiptap after init.
-        // For now, we map it to the legacy 'register' flow which might require reload.
-        registry.register({
-          id: `ext-${Date.now()}`,
-          name: "Dynamic Extension",
-          description: "Registered via Plugin API",
-          extension: ext
-        });
+        // Use the correct method on registry. 
+        // We pass the raw extension to Tiptap.
+        registry.registerExtension(ext);
         console.warn("Extension registered. Reload/Re-mount editor to apply.");
       }
     },
@@ -44,17 +39,17 @@ export const createHostAPI = (
         // Fix: Cast storage.collaboration to any to access the runtime property 'doc'
         return (editor?.storage?.collaboration as any)?.doc || new Y.Doc();
       },
-      getMap: (name) => {
+      getMap: (name: string) => {
         const editor = getEditor();
         const doc = (editor?.storage?.collaboration as any)?.doc;
         if (doc) return doc.getMap(name);
         return new Y.Doc().getMap(name); 
       },
       fs: {
-        readFile: async (path) => {
+        readFile: async (path: string) => {
           return await invoke<number[]>("read_file_content", { path });
         },
-        writeFile: async (path, content) => {
+        writeFile: async (path: string, content: number[]) => {
           return await invoke("write_file_content", { path, content });
         }
       }

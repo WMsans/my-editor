@@ -56,7 +56,7 @@ function App() {
 
         // B. Discover & Load Plugins
         // Assuming your 'plugins' folder is at the root of the app execution context
-        const pluginsDir = "plugins"; 
+        const pluginsDir = "../plugins"; 
         const manifests = await pluginLoader.discoverPlugins(pluginsDir);
         await pluginLoader.loadPlugins(api, manifests);
 
