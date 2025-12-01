@@ -53,14 +53,21 @@ export interface HostAPI {
   };
 }
 
-// --- NEW: Plugin System Types ---
-
 export interface PluginManifest {
   id: string;
   name: string;
   version: string;
-  main: string; // e.g. "index.js"
-  permissions?: string[]; // e.g. ["filesystem"]
+  main: string;
+  permissions?: string[];
+  
+  /**
+   * Defines where the plugin runs.
+   * - 'main': Runs in UI thread (Access to React/Tiptap). Risks freezing UI.
+   * - 'worker': Runs in background Worker. Safe, but limited UI access.
+   * @default 'main'
+   */
+  executionEnvironment?: 'main' | 'worker'; 
+
   contributes?: {
     slashMenu?: Array<{ command: string; title: string; description: string }>;
   };
@@ -68,6 +75,6 @@ export interface PluginManifest {
 
 export interface ActivePlugin {
   manifest: PluginManifest;
-  instance: any; // The exported module
+  instance: any;
   cleanup?: () => void;
 }

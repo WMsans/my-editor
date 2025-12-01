@@ -2,7 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { HostAPI, PluginManifest, ActivePlugin } from "./types";
 import { registry } from "./Registry";
 import { transform } from "sucrase"; 
-import { createScopedAPI } from "./HostAPIImpl"; // [NEW] Import wrapper
+import { WorkerClient } from "./worker/WorkerClient";
+import { createScopedAPI } from "./HostAPIImpl";
 
 import * as React from "react";
 import * as ReactDOM from "react-dom";
@@ -18,7 +19,7 @@ interface FileEntry {
 
 class PluginLoaderService {
   private activePlugins: Map<string, ActivePlugin> = new Map();
-  private loadedExtensions: any[] = [];
+  private workerClient: WorkerClient | null = null;
 
   async discoverPlugins(pluginsRootPath: string): Promise<PluginManifest[]> {
     try {
@@ -49,6 +50,11 @@ class PluginLoaderService {
   }
 
   async loadPlugins(api: HostAPI, manifests: PluginManifest[]) {
+    // Initialize Worker Client if needed
+    if (!this.workerClient) {
+        this.workerClient = new WorkerClient(api);
+    }
+
     for (const manifest of manifests) {
       await this.loadSinglePlugin(api, manifest);
     }
@@ -76,31 +82,16 @@ class PluginLoaderService {
         return; 
       }
 
-      const exports: any = {};
-      const module = { exports };
-      
-      const syntheticRequire = (modName: string) => {
-        switch (modName) {
-          case "react": return React;
-          case "react-dom": return ReactDOM;
-          case "@tiptap/react": return TiptapReact;
-          case "@tiptap/core": return TiptapCore;
-          case "@tiptap/pm/state": return PMState;
-          default: throw new Error(`Plugin ${manifest.id} requested unknown module ${modName}`);
-        }
-      };
-
-      const runPlugin = new Function("exports", "require", "module", "React", code);
-      runPlugin(exports, syntheticRequire, module, React);
-
-      if (exports.activate && typeof exports.activate === 'function') {
-        // [NEW] Create scoped API based on manifest permissions
-        const scopedApi = createScopedAPI(api, manifest.id, manifest.permissions || []);
-        
-        // Pass scoped API instead of global API
-        exports.activate(scopedApi);
-        
-        if (manifest.contributes?.slashMenu) {
+      if (manifest.executionEnvironment === 'worker') {
+         // --- WORKER MODE ---
+         console.log(`🚀 Loading ${manifest.name} in Worker...`);
+         
+         // In worker mode, we don't pass the main API. The worker client handles bridging.
+         this.workerClient?.loadPlugin(manifest.id, code, manifest);
+         
+         // Register Slash Commands (Manifest only)
+         // The Worker will register the handler via RPC "REGISTER_COMMAND_PROXY"
+         if (manifest.contributes?.slashMenu) {
             manifest.contributes.slashMenu.forEach(item => {
                 registry.registerSlashCommand({
                     id: manifest.id,
@@ -109,15 +100,56 @@ class PluginLoaderService {
                     description: item.description
                 });
             });
-        }
+         }
 
-        this.activePlugins.set(manifest.id, {
-          manifest,
-          instance: exports,
-        });
-        console.log(`✅ Plugin Activated: ${manifest.name}`);
+         this.activePlugins.set(manifest.id, {
+             manifest,
+             instance: { /* Placeholder for worker plugin */ }
+         });
       }
+      else{
+        const exports: any = {};
+        const module = { exports };
+        
+        const syntheticRequire = (modName: string) => {
+          switch (modName) {
+            case "react": return React;
+            case "react-dom": return ReactDOM;
+            case "@tiptap/react": return TiptapReact;
+            case "@tiptap/core": return TiptapCore;
+            case "@tiptap/pm/state": return PMState;
+            default: throw new Error(`Plugin ${manifest.id} requested unknown module ${modName}`);
+          }
+        };
 
+        const runPlugin = new Function("exports", "require", "module", "React", code);
+        runPlugin(exports, syntheticRequire, module, React);
+
+        if (exports.activate && typeof exports.activate === 'function') {
+          // [NEW] Create scoped API based on manifest permissions
+          const scopedApi = createScopedAPI(api, manifest.id, manifest.permissions || []);
+          
+          // Pass scoped API instead of global API
+          exports.activate(scopedApi);
+          
+          if (manifest.contributes?.slashMenu) {
+              manifest.contributes.slashMenu.forEach(item => {
+                  registry.registerSlashCommand({
+                      id: manifest.id,
+                      command: item.command,
+                      title: item.title,
+                      description: item.description
+                  });
+              });
+          }
+
+          this.activePlugins.set(manifest.id, {
+            manifest,
+            instance: exports,
+          });
+          console.log(`✅ Plugin Activated: ${manifest.name}`);
+        }
+      }
     } catch (e) {
       console.error(`Failed to load plugin ${manifest.id}:`, e);
     }
@@ -130,6 +162,8 @@ class PluginLoaderService {
       }
     });
     this.activePlugins.clear();
+    this.workerClient?.terminate();
+    this.workerClient = null;
   }
 }
 
