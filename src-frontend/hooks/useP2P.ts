@@ -54,11 +54,24 @@ export function useP2P(
         setIncomingRequest(e.payload);
         setStatus(`Incoming request from ${e.payload.slice(0, 8)}...`);
       }),
-      listen<number[]>("join-accepted", (e) => {
-        onProjectReceived(e.payload);
-        setIsHost(false);
-        setIsJoining(false);
-        setStatus("Joined session! Folder synced.");
+      // [CHANGED] Safer join-accepted handler
+      listen<number[]>("join-accepted", async (e) => {
+        try {
+            // Force guest state immediately
+            setIsHost(false);
+            
+            // Handle file saving (this might block or take time)
+            await onProjectReceived(e.payload);
+            
+            setStatus("Joined session! Folder synced.");
+        } catch (err) {
+            console.error("Error receiving project:", err);
+            setStatus("Error syncing project folder.");
+        } finally {
+            // Ensure we exit joining state even if save fails
+            setIsJoining(false);
+            setIsHost(false); // Double check
+        }
       }),
       listen<string>("host-disconnected", (e) => {
         setStatus(`⚠ Host disconnected! Negotiating...`);
@@ -139,6 +152,6 @@ export function useP2P(
     rejectRequest,
     requestSync,
     myAddresses,
-    connectedPeers // Export this
+    connectedPeers
   };
 }
