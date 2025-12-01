@@ -21,8 +21,7 @@ export function activate(context: any) {
               if (mode === 'insert') {
                 if (event.key === 'Escape') {
                   mode = 'normal';
-                  context.ui.showNotification("VIM: Normal Mode");
-                  // Ensure we focus back to properly capture keys
+                  // context.ui.showNotification("VIM: Normal Mode");
                   view.focus(); 
                   return true; 
                 }
@@ -31,69 +30,73 @@ export function activate(context: any) {
 
               // 2. Normal Mode Logic (Intercept Everything)
               
-              // i: Insert at cursor
               if (event.key === 'i') {
                 mode = 'insert';
-                context.ui.showNotification("VIM: Insert Mode");
+                // context.ui.showNotification("VIM: Insert Mode");
                 return true;
               }
 
-              // a: Append (move right then insert)
               if (event.key === 'a') {
                 if (dispatch) {
-                   // Calculate position + 1 (ensure we don't go out of bounds)
                    const newPos = Math.min(doc.content.size, selection.from + 1);
                    const tr = state.tr.setSelection(TextSelection.create(doc, newPos));
                    dispatch(tr);
                 }
                 mode = 'insert';
-                context.ui.showNotification("VIM: Insert Mode");
+                // context.ui.showNotification("VIM: Insert Mode");
                 return true;
               }
 
               // Navigation (HJKL)
               if (['h', 'j', 'k', 'l'].includes(event.key)) {
-                // We use Tiptap commands for navigation to leverage View-based layout logic
-                // (especially for J/K vertical movement which requires layout awareness)
-                const editor = context.editor.getSafeInstance();
-                if (!editor) return false;
-
+                
                 if (event.key === 'h') {
                     // Left
-                    editor.commands.command(({ tr, dispatch }: any) => {
-                        if (dispatch) {
-                            const newPos = Math.max(0, selection.from - 1);
-                            dispatch(tr.setSelection(TextSelection.create(doc, newPos)));
-                        }
-                        return true;
-                    });
+                    if (dispatch) {
+                        const newPos = Math.max(0, selection.from - 1);
+                        dispatch(state.tr.setSelection(TextSelection.create(doc, newPos)));
+                    }
                 }
                 if (event.key === 'l') {
                     // Right
-                    editor.commands.command(({ tr, dispatch }: any) => {
-                        if (dispatch) {
-                            const newPos = Math.min(doc.content.size, selection.from + 1);
-                            dispatch(tr.setSelection(TextSelection.create(doc, newPos)));
-                        }
-                        return true;
+                    if (dispatch) {
+                        const newPos = Math.min(doc.content.size, selection.from + 1);
+                        dispatch(state.tr.setSelection(TextSelection.create(doc, newPos)));
+                    }
+                }
+                
+                // Vertical Navigation Fix
+                if (event.key === 'j' || event.key === 'k') {
+                    const startCoords = view.coordsAtPos(selection.from);
+                    // Estimate line height from current cursor size. Default to 20 if 0.
+                    const lineHeight = (startCoords.bottom - startCoords.top) || 20;
+                    
+                    // We jump by full line height + padding to clear inter-line margins (0.5em ~ 8px)
+                    // Down: From bottom + 10px (clears margin)
+                    // Up: From top - 10px (clears margin)
+                    const verticalStep = Math.max(lineHeight, 15);
+
+                    const targetY = event.key === 'j' 
+                        ? startCoords.bottom + verticalStep
+                        : startCoords.top - verticalStep;
+
+                    const targetPos = view.posAtCoords({ 
+                        left: startCoords.left, 
+                        top: targetY
                     });
-                }
-                if (event.key === 'j') {
-                    // Down (Relies on Tiptap/ProseMirror view logic)
-                    editor.commands.focus('down');
-                }
-                if (event.key === 'k') {
-                    // Up
-                    editor.commands.focus('up');
+                    
+                    if (targetPos && dispatch) {
+                         const tr = state.tr.setSelection(TextSelection.create(doc, targetPos.pos));
+                         dispatch(tr.scrollIntoView());
+                    }
                 }
                 
                 return true;
               }
 
-              // Block other keys in Normal mode
               if (event.ctrlKey || event.metaKey || event.altKey) return false;
-              if (event.key.startsWith("Arrow")) return false; // Allow default arrows
-              if (event.key.length === 1) return true; // Block typing
+              if (event.key.startsWith("Arrow")) return false; 
+              if (event.key.length === 1) return true; 
 
               return false;
             }
@@ -103,7 +106,6 @@ export function activate(context: any) {
     },
   });
 
-  // REGISTER AS HIGH PRIORITY
   context.editor.registerExtension(VimExtension, { priority: 'high' });
   context.ui.showNotification("Vim Mode Loaded (Press 'i' to insert, 'Esc' for normal)");
 }
