@@ -30,19 +30,15 @@ export interface SidebarTab {
 
 export interface HostAPI {
   editor: {
-    // Allows plugins to register Tiptap extensions
-    registerExtension: (ext: Node | Extension) => void;
-    // Expose commands and state for manipulation
+    registerExtension: (ext: Node | Extension, options?: { priority?: 'high' | 'normal' }) => void;
     getCommands: () => any; 
     getState: () => EditorState | null;
-    // [FIX] Expose the editor instance for plugins
     getSafeInstance: () => Editor | null;
   };
   ui: {
     registerSidebarTab: (tab: SidebarTab) => void;
     showNotification: (msg: string) => void;
   };
-  // Command Registry for Plugins
   commands: {
     registerCommand: (id: string, handler: (args?: any) => void) => void;
     executeCommand: (id: string, args?: any) => void;

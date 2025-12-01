@@ -1,46 +1,56 @@
 import { Mod, SidebarTab, HostAPI } from "./types";
 
 interface SlashCommandDef {
-    id: string; // Plugin ID
-    command: string; // e.g., "simulation.insert"
+    id: string; 
+    command: string; 
     title: string;
     description: string;
 }
 
 class Registry {
-  // Tiptap Extensions (gathered during plugin loading)
+  // [CHANGED] Separate high priority extensions
+  private highPriorityExtensions: any[] = [];
   private dynamicExtensions: any[] = [];
   
   // UI Elements
   private sidebarTabs: SidebarTab[] = [];
   private slashCommands: SlashCommandDef[] = [];
   
-  // [NEW] Command Handlers
+  // Command Handlers
   private commandHandlers = new Map<string, (args?: any) => void>();
   
   private api: HostAPI | null = null;
 
   init(api: HostAPI) {
     this.api = api;
-    // Clear existing registries to prevent duplicates on re-initialization
     this.dynamicExtensions = [];
+    this.highPriorityExtensions = []; // Clear high priority
     this.sidebarTabs = [];
     this.slashCommands = [];
     this.commandHandlers.clear();
   }
 
   // --- Extension Management ---
-  registerExtension(ext: any) {
-    this.dynamicExtensions.push(ext);
+  // [CHANGED] Accept priority
+  registerExtension(ext: any, priority: 'high' | 'normal' = 'normal') {
+    if (priority === 'high') {
+        this.highPriorityExtensions.push(ext);
+    } else {
+        this.dynamicExtensions.push(ext);
+    }
   }
 
   getExtensions() {
     return this.dynamicExtensions;
   }
 
-  // --- Slash Menu Management ---
+  // [NEW]
+  getHighPriorityExtensions() {
+    return this.highPriorityExtensions;
+  }
+
+  // ... (keep rest of file: registerSlashCommand, etc.)
   registerSlashCommand(cmd: SlashCommandDef) {
-    // [FIX] Deduplication check: Do not add if already exists
     const exists = this.slashCommands.some(
       (existing) => existing.id === cmd.id && existing.command === cmd.command
     );
@@ -49,20 +59,10 @@ class Registry {
     }
   }
 
-  getAllSlashCommands() {
-    return this.slashCommands;
-  }
-
-  // --- Sidebar Management ---
-  registerSidebarTab(tab: SidebarTab) {
-    this.sidebarTabs.push(tab);
-  }
-
-  getSidebarTabs(): SidebarTab[] {
-    return this.sidebarTabs;
-  }
-
-  // --- Command Registry Implementation ---
+  getAllSlashCommands() { return this.slashCommands; }
+  registerSidebarTab(tab: SidebarTab) { this.sidebarTabs.push(tab); }
+  getSidebarTabs(): SidebarTab[] { return this.sidebarTabs; }
+  
   registerCommand(id: string, handler: (args?: any) => void) {
     if (this.commandHandlers.has(id)) {
         console.warn(`Command "${id}" is being overwritten.`);

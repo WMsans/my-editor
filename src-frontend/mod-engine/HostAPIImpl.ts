@@ -10,13 +10,14 @@ export const createHostAPI = (
 ): HostAPI => {
   return {
     editor: {
-      // [FIX] Implement getSafeInstance to return the editor
       getSafeInstance: () => getEditor(),
       getCommands: () => getEditor()?.commands || null,
       getState: () => getEditor()?.state || null,
-      registerExtension: (ext) => {
-        registry.registerExtension(ext);
-        console.warn("Extension registered. Reload/Re-mount editor to apply.");
+      // [CHANGED] Handle options
+      registerExtension: (ext, options) => {
+        const priority = options?.priority || 'normal';
+        registry.registerExtension(ext, priority);
+        console.log(`Extension registered (Priority: ${priority})`);
       }
     },
     ui: {

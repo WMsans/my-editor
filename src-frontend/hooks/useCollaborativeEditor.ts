@@ -10,6 +10,9 @@ import { registry } from "../mod-engine/Registry";
 export function useCollaborativeEditor(doc: Y.Doc | null) {
   const editor = useEditor({
     extensions: [
+      // [NEW] High Priority Plugins go FIRST (intercept keys before StarterKit)
+      ...registry.getHighPriorityExtensions(),
+      
       StarterKit.configure({ 
         // @ts-ignore
         history: false 
@@ -17,7 +20,9 @@ export function useCollaborativeEditor(doc: Y.Doc | null) {
       Collaboration.configure({ document: doc || new Y.Doc() }),
       Markdown,
       BubbleMenuExtension,
-      ...registry.getExtensions() // This now handles the dynamic plugins
+      
+      // Standard plugins
+      ...registry.getExtensions() 
     ],
     editorProps: { attributes: { class: "editor-content" } },
   }, [doc]);
