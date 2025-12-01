@@ -4,7 +4,6 @@ import { registry } from "./Registry";
 import { invoke } from "@tauri-apps/api/core";
 import * as Y from "yjs";
 
-// [NEW] Define interface for injected plugin manager
 interface PluginManager {
   getAll: () => Promise<PluginManifest[]>;
   isEnabled: (id: string) => boolean;
@@ -13,10 +12,20 @@ interface PluginManager {
 
 export const createHostAPI = (
   getEditor: () => Editor | null,
+  getRootPath: () => string | null, 
   setWarningMsg: (msg: string) => void,
-  // [NEW] Inject plugin manager to avoid circular dependency
   pluginManager?: PluginManager 
 ): HostAPI => {
+  
+  // Helper to resolve paths relative to root
+  const resolvePath = (path: string) => {
+    const root = getRootPath();
+    if (!root) return path; // Fallback if no project open
+    if (path.startsWith("/") || path.match(/^[a-zA-Z]:/)) return path; // Already absolute
+    const sep = root.includes("\\") ? "\\" : "/";
+    return `${root}${sep}${path}`;
+  };
+
   return {
     editor: {
       getSafeInstance: () => getEditor(),
@@ -57,10 +66,13 @@ export const createHostAPI = (
       },
       fs: {
         readFile: async (path: string) => {
-          return await invoke<number[]>("read_file_content", { path });
+          return await invoke<number[]>("read_file_content", { path: resolvePath(path) });
         },
         writeFile: async (path: string, content: number[]) => {
-          return await invoke("write_file_content", { path, content });
+          return await invoke("write_file_content", { path: resolvePath(path), content });
+        },
+        createDirectory: async (path: string) => {
+          return await invoke("create_directory", { path: resolvePath(path) });
         }
       }
     },
@@ -99,6 +111,15 @@ export const createScopedAPI = (baseApi: HostAPI, pluginId: string, permissions:
             throw new Error(msg);
           }
           return baseApi.data.fs.writeFile(path, content);
+        },
+        createDirectory: async (path: string) => {
+          if (!hasPermission("filesystem")) {
+            const msg = `Security Violation: Plugin '${pluginId}' attempted to create directory '${path}' without 'filesystem' permission.`;
+            console.error(msg);
+            baseApi.ui.showNotification(msg);
+            throw new Error(msg);
+          }
+          return baseApi.data.fs.createDirectory(path);
         }
       }
     }

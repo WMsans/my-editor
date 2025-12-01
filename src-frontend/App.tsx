@@ -166,6 +166,7 @@ function App() {
         // A. Setup Host API
         const api = createHostAPI(
           () => editorRef.current, 
+          () => rootPathRef.current,
           setWarningMsg,
           {
             getAll: async () => pluginLoader.getAllManifests(),
@@ -183,10 +184,10 @@ function App() {
         const pluginsDir = "../plugins"; 
         
         const manifests = await pluginLoader.discoverPlugins(pluginsDir);
-        if (!isMounted) return; // Guard: Stop if unmounted during await
+        if (!isMounted) return; 
 
         await pluginLoader.loadPlugins(api, manifests);
-        if (!isMounted) return; // Guard: Stop if unmounted during await
+        if (!isMounted) return; 
 
         // C. Ready
         setIsAppReady(true);

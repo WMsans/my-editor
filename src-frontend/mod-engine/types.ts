@@ -49,6 +49,7 @@ export interface HostAPI {
     fs: {
       readFile: (path: string) => Promise<number[]>;
       writeFile: (path: string, content: number[]) => Promise<void>;
+      createDirectory: (path: string) => Promise<void>; 
     }
   };
   // [NEW] Plugin Management API
