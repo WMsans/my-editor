@@ -1,26 +1,20 @@
 import { HostAPI } from "./types";
 import { Editor } from "@tiptap/react";
 import { registry } from "./Registry";
-import { documentRegistry } from "./DocumentRegistry";
 import { invoke } from "@tauri-apps/api/core";
 import * as Y from "yjs";
 
-/**
- * Factory to create the HostAPI object.
- * We use a getter for the editor because the editor instance is recreated
- * whenever the document changes or reloads.
- */
 export const createHostAPI = (
   getEditor: () => Editor | null,
   setWarningMsg: (msg: string) => void
 ): HostAPI => {
   return {
     editor: {
+      // [FIX] Implement getSafeInstance to return the editor
+      getSafeInstance: () => getEditor(),
       getCommands: () => getEditor()?.commands || null,
       getState: () => getEditor()?.state || null,
       registerExtension: (ext) => {
-        // Use the correct method on registry. 
-        // We pass the raw extension to Tiptap.
         registry.registerExtension(ext);
         console.warn("Extension registered. Reload/Re-mount editor to apply.");
       }
@@ -33,7 +27,6 @@ export const createHostAPI = (
         setWarningMsg(msg);
       }
     },
-    // [NEW] Expose Command Registry
     commands: {
       registerCommand: (id, handler) => {
         registry.registerCommand(id, handler);
@@ -45,7 +38,6 @@ export const createHostAPI = (
     data: {
       getDoc: () => {
         const editor = getEditor();
-        // Fix: Cast storage.collaboration to any to access the runtime property 'doc'
         return (editor?.storage?.collaboration as any)?.doc || new Y.Doc();
       },
       getMap: (name: string) => {

@@ -35,12 +35,14 @@ export interface HostAPI {
     // Expose commands and state for manipulation
     getCommands: () => any; 
     getState: () => EditorState | null;
+    // [FIX] Expose the editor instance for plugins
+    getSafeInstance: () => Editor | null;
   };
   ui: {
     registerSidebarTab: (tab: SidebarTab) => void;
     showNotification: (msg: string) => void;
   };
-  // [NEW] Command Registry for Plugins
+  // Command Registry for Plugins
   commands: {
     registerCommand: (id: string, handler: (args?: any) => void) => void;
     executeCommand: (id: string, args?: any) => void;

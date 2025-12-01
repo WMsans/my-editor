@@ -1,27 +1,32 @@
 import { Mod, SidebarTab, HostAPI } from "./types";
 
 interface SlashCommandDef {
-    id: string; // Plugin ID
-    command: string; // e.g., "simulation.insert"
+    id: string; 
+    command: string; 
     title: string;
     description: string;
 }
 
 class Registry {
-  // Tiptap Extensions (gathered during plugin loading)
+  // Tiptap Extensions
   private dynamicExtensions: any[] = [];
   
   // UI Elements
   private sidebarTabs: SidebarTab[] = [];
   private slashCommands: SlashCommandDef[] = [];
   
-  // [NEW] Command Handlers
+  // Command Handlers
   private commandHandlers = new Map<string, (args?: any) => void>();
   
   private api: HostAPI | null = null;
 
   init(api: HostAPI) {
     this.api = api;
+    // [FIX] Clear existing registries to prevent duplicates on re-initialization
+    this.dynamicExtensions = [];
+    this.sidebarTabs = [];
+    this.slashCommands = [];
+    this.commandHandlers.clear();
   }
 
   // --- Extension Management ---
@@ -51,7 +56,7 @@ class Registry {
     return this.sidebarTabs;
   }
 
-  // --- [NEW] Command Registry Implementation ---
+  // --- Command Registry Implementation ---
   registerCommand(id: string, handler: (args?: any) => void) {
     if (this.commandHandlers.has(id)) {
         console.warn(`Command "${id}" is being overwritten.`);
