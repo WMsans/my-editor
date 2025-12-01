@@ -33,6 +33,15 @@ export const createHostAPI = (
         setWarningMsg(msg);
       }
     },
+    // [NEW] Expose Command Registry
+    commands: {
+      registerCommand: (id, handler) => {
+        registry.registerCommand(id, handler);
+      },
+      executeCommand: (id, args) => {
+        registry.executeCommand(id, args);
+      }
+    },
     data: {
       getDoc: () => {
         const editor = getEditor();

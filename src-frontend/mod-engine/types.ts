@@ -40,6 +40,11 @@ export interface HostAPI {
     registerSidebarTab: (tab: SidebarTab) => void;
     showNotification: (msg: string) => void;
   };
+  // [NEW] Command Registry for Plugins
+  commands: {
+    registerCommand: (id: string, handler: (args?: any) => void) => void;
+    executeCommand: (id: string, args?: any) => void;
+  };
   data: {
     getDoc: () => Y.Doc;
     getMap: (name: string) => Y.Map<any>;

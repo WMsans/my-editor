@@ -1,4 +1,3 @@
-// src-frontend/components/SlashMenu.tsx
 import React, { useEffect, useState } from "react";
 import { Editor } from "@tiptap/react";
 import { registry } from "../mod-engine/Registry";
@@ -42,13 +41,13 @@ export const SlashMenu: React.FC<SlashMenuProps> = ({ editor }) => {
     return () => { editor.off("transaction", handleUpdate); };
   }, [editor]);
 
-  const executeCommand = (cmd: any) => {
-    // Delete the "/"
+  const executeCommand = (cmdDef: any) => {
+    // 1. Delete the "/" that triggered the menu
     editor.commands.deleteRange({ from: editor.state.selection.from - 1, to: editor.state.selection.from });
     
-    if (cmd.command === 'simulation.insert') {
-      editor.commands.insertContent({ type: 'simulationBlock' });
-    }
+    // 2. [CHANGED] Execute the command via registry dynamically
+    // The plugin should have registered this command string via context.commands.registerCommand
+    registry.executeCommand(cmdDef.command);
     
     setIsOpen(false);
   };
@@ -63,9 +62,9 @@ export const SlashMenu: React.FC<SlashMenuProps> = ({ editor }) => {
       <div className="slash-header">Add Block</div>
       {items.map((mod, index) => (
         <button
-          key={mod.id}
+          key={mod.id + mod.command} // Use composite key
           className={`slash-item ${index === selectedIndex ? 'selected' : ''}`}
-          onClick={() => executeCommand(mod.id)}
+          onClick={() => executeCommand(mod)}
           onMouseEnter={() => setSelectedIndex(index)}
         >
           <strong>{mod.title}</strong>
