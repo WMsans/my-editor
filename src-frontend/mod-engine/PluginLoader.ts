@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { HostAPI, PluginManifest, ActivePlugin } from "./types";
 import { registry } from "./Registry";
+import { transform } from "sucrase"; // [NEW] Import transpiler
 
 // --- Host Dependencies for Injection ---
 // Plugins import these, but we provide the host instances to ensure singletons.
@@ -74,7 +75,23 @@ class PluginLoaderService {
 
       // 1. Read Code
       const codeBytes = await invoke<number[]>("read_file_content", { path: mainPath });
-      let code = new TextDecoder().decode(new Uint8Array(codeBytes));
+      const rawCode = new TextDecoder().decode(new Uint8Array(codeBytes));
+
+      // [NEW] 1.5 Transpile Code
+      // We use Sucrase to transform TypeScript/JSX/ESM to CommonJS on the fly.
+      // This handles 'import' statements and JSX syntax that 'new Function' cannot.
+      let code = rawCode;
+      try {
+        const compiled = transform(rawCode, {
+          transforms: ["typescript", "jsx", "imports"],
+          filePath: mainPath,
+          production: true, 
+        });
+        code = compiled.code;
+      } catch (err) {
+        console.error(`Transpilation failed for ${manifest.id}:`, err);
+        return; 
+      }
 
       // 2. Dependency Injection (Poor man's module system)
       // In a real production app, you would compile plugins to UMD or SystemJS.
@@ -94,10 +111,8 @@ class PluginLoaderService {
 
       // 3. Execution Wrapper
       // We wrap the code in a function to inject our globals.
-      // NOTE: This assumes the plugin code is transpiled to JS (CommonJS or similar)
-      // If it contains "import ... from", this eval will fail unless we strip them.
+      // The transpiled code (CommonJS) uses 'require' and 'exports'.
       
-      // For this demo, let's assume standard Function constructor wrapping:
       const runPlugin = new Function("exports", "require", "module", "React", code);
       
       runPlugin(exports, syntheticRequire, module, React);
