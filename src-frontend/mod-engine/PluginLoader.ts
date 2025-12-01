@@ -2,12 +2,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { HostAPI, PluginManifest, ActivePlugin } from "./types";
 import { registry } from "./Registry";
 import { transform } from "sucrase"; 
+import { createScopedAPI } from "./HostAPIImpl"; // [NEW] Import wrapper
 
 import * as React from "react";
 import * as ReactDOM from "react-dom";
 import * as TiptapReact from "@tiptap/react";
 import * as TiptapCore from "@tiptap/core";
-// [NEW] Import ProseMirror State
 import * as PMState from "@tiptap/pm/state";
 
 interface FileEntry {
@@ -20,7 +20,6 @@ class PluginLoaderService {
   private activePlugins: Map<string, ActivePlugin> = new Map();
   private loadedExtensions: any[] = [];
 
-  // ... (keep discoverPlugins)
   async discoverPlugins(pluginsRootPath: string): Promise<PluginManifest[]> {
     try {
       const entries = await invoke<FileEntry[]>("read_directory", { path: pluginsRootPath });
@@ -86,7 +85,6 @@ class PluginLoaderService {
           case "react-dom": return ReactDOM;
           case "@tiptap/react": return TiptapReact;
           case "@tiptap/core": return TiptapCore;
-          // [NEW] Expose ProseMirror State
           case "@tiptap/pm/state": return PMState;
           default: throw new Error(`Plugin ${manifest.id} requested unknown module ${modName}`);
         }
@@ -96,7 +94,11 @@ class PluginLoaderService {
       runPlugin(exports, syntheticRequire, module, React);
 
       if (exports.activate && typeof exports.activate === 'function') {
-        exports.activate(api);
+        // [NEW] Create scoped API based on manifest permissions
+        const scopedApi = createScopedAPI(api, manifest.id, manifest.permissions || []);
+        
+        // Pass scoped API instead of global API
+        exports.activate(scopedApi);
         
         if (manifest.contributes?.slashMenu) {
             manifest.contributes.slashMenu.forEach(item => {

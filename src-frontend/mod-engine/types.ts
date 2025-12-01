@@ -60,6 +60,7 @@ export interface PluginManifest {
   name: string;
   version: string;
   main: string; // e.g. "index.js"
+  permissions?: string[]; // e.g. ["filesystem"]
   contributes?: {
     slashMenu?: Array<{ command: string; title: string; description: string }>;
   };

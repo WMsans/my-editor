@@ -1,10 +1,11 @@
 {
   "id": "simulation-block",
   "name": "Simulation Container",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "A Turing-complete JavaScript sandbox for the editor.",
   "author": "User",
   "main": "index.tsx",
+  "permissions": [],
   "activationEvents": [
     "onStartup" 
   ],

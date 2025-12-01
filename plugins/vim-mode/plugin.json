@@ -5,5 +5,6 @@
   "description": "Basic Vim navigation and modes.",
   "author": "User",
   "main": "index.tsx",
+  "permissions": [],
   "activationEvents": [ "onStartup" ]
 }
