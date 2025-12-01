@@ -20,6 +20,7 @@ interface FileEntry {
 class PluginLoaderService {
   private activePlugins: Map<string, ActivePlugin> = new Map();
   private workerClient: WorkerClient | null = null;
+  private allManifests: PluginManifest[] = []; // [NEW] Store all discovered plugins
 
   async discoverPlugins(pluginsRootPath: string): Promise<PluginManifest[]> {
     try {
@@ -42,12 +43,32 @@ class PluginLoaderService {
           }
         }
       }
+      this.allManifests = manifests; // [NEW] Save for listing later
       return manifests;
     } catch (e) {
       console.error("Failed to scan plugins directory:", e);
       return [];
     }
   }
+
+  // [NEW] Helper to check persistent storage
+  isPluginEnabled(id: string): boolean {
+    const disabled = JSON.parse(localStorage.getItem("disabled_plugins") || "[]");
+    return !disabled.includes(id);
+  }
+
+  // [NEW] Helper to set persistent storage
+  setPluginEnabled(id: string, enabled: boolean) {
+    let disabled = JSON.parse(localStorage.getItem("disabled_plugins") || "[]");
+    if (enabled) {
+        disabled = disabled.filter((x: string) => x !== id);
+    } else {
+        if (!disabled.includes(id)) disabled.push(id);
+    }
+    localStorage.setItem("disabled_plugins", JSON.stringify(disabled));
+  }
+  
+  getAllManifests() { return this.allManifests; }
 
   async loadPlugins(api: HostAPI, manifests: PluginManifest[]) {
     // Initialize Worker Client if needed
@@ -56,6 +77,11 @@ class PluginLoaderService {
     }
 
     for (const manifest of manifests) {
+      // [NEW] Skip disabled plugins
+      if (!this.isPluginEnabled(manifest.id)) {
+          console.log(`⏸️ Plugin '${manifest.id}' is disabled.`);
+          continue;
+      }
       await this.loadSinglePlugin(api, manifest);
     }
   }

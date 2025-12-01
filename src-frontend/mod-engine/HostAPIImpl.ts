@@ -1,12 +1,21 @@
-import { HostAPI } from "./types";
+import { HostAPI, PluginManifest } from "./types";
 import { Editor } from "@tiptap/react";
 import { registry } from "./Registry";
 import { invoke } from "@tauri-apps/api/core";
 import * as Y from "yjs";
 
+// [NEW] Define interface for injected plugin manager
+interface PluginManager {
+  getAll: () => Promise<PluginManifest[]>;
+  isEnabled: (id: string) => boolean;
+  setEnabled: (id: string, enabled: boolean) => void;
+}
+
 export const createHostAPI = (
   getEditor: () => Editor | null,
-  setWarningMsg: (msg: string) => void
+  setWarningMsg: (msg: string) => void,
+  // [NEW] Inject plugin manager to avoid circular dependency
+  pluginManager?: PluginManager 
 ): HostAPI => {
   return {
     editor: {
@@ -54,6 +63,12 @@ export const createHostAPI = (
           return await invoke("write_file_content", { path, content });
         }
       }
+    },
+    // [NEW] Plugin Management
+    plugins: {
+        getAll: async () => pluginManager ? pluginManager.getAll() : [],
+        isEnabled: (id) => pluginManager ? pluginManager.isEnabled(id) : true,
+        setEnabled: (id, val) => pluginManager?.setEnabled(id, val)
     }
   };
 };

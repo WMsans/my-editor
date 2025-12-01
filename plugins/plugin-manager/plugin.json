@@ -1,0 +1,10 @@
+{
+  "id": "plugin-manager",
+  "name": "Plugin Manager",
+  "version": "0.1.0",
+  "description": "Manage installed plugins.",
+  "author": "System",
+  "main": "index.tsx",
+  "permissions": [],
+  "activationEvents": [ "onStartup" ]
+}

@@ -51,6 +51,12 @@ export interface HostAPI {
       writeFile: (path: string, content: number[]) => Promise<void>;
     }
   };
+  // [NEW] Plugin Management API
+  plugins: {
+    getAll: () => Promise<PluginManifest[]>;
+    isEnabled: (id: string) => boolean;
+    setEnabled: (id: string, enabled: boolean) => void;
+  };
 }
 
 export interface PluginManifest {

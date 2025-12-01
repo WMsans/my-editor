@@ -164,7 +164,15 @@ function App() {
         if (!isMounted) return;
 
         // A. Setup Host API
-        const api = createHostAPI(() => editorRef.current, setWarningMsg);
+        const api = createHostAPI(
+          () => editorRef.current, 
+          setWarningMsg,
+          {
+            getAll: async () => pluginLoader.getAllManifests(),
+            isEnabled: (id) => pluginLoader.isPluginEnabled(id),
+            setEnabled: (id, val) => pluginLoader.setPluginEnabled(id, val)
+          }
+        );
         // @ts-ignore
         window.CollabAPI = api;
         
