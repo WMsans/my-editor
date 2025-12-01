@@ -44,37 +44,7 @@ function App() {
   const [isAppReady, setIsAppReady] = useState(false);
   const [loadError, setLoadError] = useState<string|null>(null);
 
-  useEffect(() => {
-    const initEngine = async () => {
-      try {
-        // A. Setup Host API (mock editor for now, will link real one later)
-        // We need a stable reference to the editor getter, which will work once EditorArea mounts
-        const api = createHostAPI(() => editorRef.current, setWarningMsg);
-        // @ts-ignore
-        window.CollabAPI = api;
-        registry.init(api);
-
-        // B. Discover & Load Plugins
-        // Assuming your 'plugins' folder is at the root of the app execution context
-        const pluginsDir = "../plugins"; 
-        const manifests = await pluginLoader.discoverPlugins(pluginsDir);
-        await pluginLoader.loadPlugins(api, manifests);
-
-        // C. Ready
-        setIsAppReady(true);
-      } catch (e: any) {
-        setLoadError(e.toString());
-      }
-    };
-
-    initEngine();
-
-    // Cleanup
-    return () => {
-      pluginLoader.deactivateAll();
-    };
-  }, []);
-  
+  // Sync Encryption Key Ref
   useEffect(() => {
     encryptionKeyRef.current = encryptionKey;
     localStorage.setItem("encryptionKey", encryptionKey);
@@ -187,17 +157,44 @@ function App() {
   useEffect(() => { editorRef.current = editor; }, [editor]);
 
   useEffect(() => {
-    // Initialize the API only once (or when dependencies that matter change)
-    // We pass a getter for editor so the API always gets the fresh instance
-    const api = createHostAPI(() => editorRef.current, setWarningMsg);
-    
-    // Expose globally
-    // @ts-ignore
-    window.CollabAPI = api;
+    let isMounted = true; 
 
-    // Initialize Registry with API (activates registered plugins)
-    registry.init(api);
-  }, [setWarningMsg]); // Deps: mainly stable functions
+    const initEngine = async () => {
+      try {
+        if (!isMounted) return;
+
+        // A. Setup Host API
+        const api = createHostAPI(() => editorRef.current, setWarningMsg);
+        // @ts-ignore
+        window.CollabAPI = api;
+        
+        // Clear registry before loading
+        registry.init(api);
+
+        // B. Discover & Load Plugins
+        const pluginsDir = "../plugins"; 
+        
+        const manifests = await pluginLoader.discoverPlugins(pluginsDir);
+        if (!isMounted) return; // Guard: Stop if unmounted during await
+
+        await pluginLoader.loadPlugins(api, manifests);
+        if (!isMounted) return; // Guard: Stop if unmounted during await
+
+        // C. Ready
+        setIsAppReady(true);
+      } catch (e: any) {
+        if (isMounted) setLoadError(e.toString());
+      }
+    };
+
+    initEngine();
+
+    // Cleanup: Cancel any pending loads
+    return () => {
+      isMounted = false;
+      pluginLoader.deactivateAll();
+    };
+  }, []); // Deps: Empty array (run once)
 
   useEffect(() => { setIsSyncingRef.current = setIsSyncing; }, [setIsSyncing]);
   useEffect(() => { if (showSettings) refreshRemoteOrigin(); }, [showSettings, refreshRemoteOrigin]);

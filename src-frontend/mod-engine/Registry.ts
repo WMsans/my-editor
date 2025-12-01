@@ -1,28 +1,28 @@
 import { Mod, SidebarTab, HostAPI } from "./types";
 
 interface SlashCommandDef {
-    id: string; 
-    command: string; 
+    id: string; // Plugin ID
+    command: string; // e.g., "simulation.insert"
     title: string;
     description: string;
 }
 
 class Registry {
-  // Tiptap Extensions
+  // Tiptap Extensions (gathered during plugin loading)
   private dynamicExtensions: any[] = [];
   
   // UI Elements
   private sidebarTabs: SidebarTab[] = [];
   private slashCommands: SlashCommandDef[] = [];
   
-  // Command Handlers
+  // [NEW] Command Handlers
   private commandHandlers = new Map<string, (args?: any) => void>();
   
   private api: HostAPI | null = null;
 
   init(api: HostAPI) {
     this.api = api;
-    // [FIX] Clear existing registries to prevent duplicates on re-initialization
+    // Clear existing registries to prevent duplicates on re-initialization
     this.dynamicExtensions = [];
     this.sidebarTabs = [];
     this.slashCommands = [];
@@ -40,7 +40,13 @@ class Registry {
 
   // --- Slash Menu Management ---
   registerSlashCommand(cmd: SlashCommandDef) {
-    this.slashCommands.push(cmd);
+    // [FIX] Deduplication check: Do not add if already exists
+    const exists = this.slashCommands.some(
+      (existing) => existing.id === cmd.id && existing.command === cmd.command
+    );
+    if (!exists) {
+      this.slashCommands.push(cmd);
+    }
   }
 
   getAllSlashCommands() {
