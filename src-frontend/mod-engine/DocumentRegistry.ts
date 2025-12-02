@@ -57,6 +57,30 @@ class DocumentRegistry {
     if(entry) entry.isSynced = true;
   }
 
+  // [NEW] Helper to write assets directly (bypassing Y.Doc)
+  public async writeAsset(relativePath: string, content: Uint8Array) {
+    const absolutePath = this.getAbsolutePath(relativePath);
+    
+    // Ensure directory exists (basic handling)
+    try {
+        const sep = this.rootPath.includes("\\") ? "\\" : "/";
+        const lastSlash = absolutePath.lastIndexOf(sep);
+        if (lastSlash !== -1) {
+            const dir = absolutePath.substring(0, lastSlash);
+            await invoke("create_directory", { path: dir });
+        }
+    } catch (e) {
+        // Ignore directory creation errors (likely exists)
+    }
+
+    try {
+        await invoke("write_file_content", { path: absolutePath, content: Array.from(content) });
+        console.log(`Synced asset: ${relativePath}`);
+    } catch(e) {
+        console.error(`Failed to write asset ${relativePath}`, e);
+    }
+  }
+
   // Helper to manually trigger a save (e.g. from the Save button)
   public async manualSave(relativePath: string) {
     // [FIX] Guest should not save to disk locally

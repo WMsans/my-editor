@@ -86,6 +86,8 @@ export function useP2P(
       }),
       
       listen<{ path: string, data: number[] }>("p2p-sync", (e) => {
+        const { path, data } = e.payload;
+
         // [FIX] Implicit Join Recovery
         // If we receive sync data from the host, the connection is alive.
         // If we were stuck in 'Requesting to join...', break out immediately.
@@ -96,8 +98,16 @@ export function useP2P(
             setStatus("Joined session (Synced).");
         }
 
-        documentRegistry.applyUpdate(e.payload.path, new Uint8Array(e.payload.data));
-        if (onFileSync) onFileSync(e.payload.path);
+        // [FIX] Handle Binary Assets (Images, etc.)
+        // If it looks like an image or is in the resources folder, write directly to disk
+        if (path.match(/\.(png|jpg|jpeg|gif|svg|webp)$/i) || path.startsWith("resources/")) {
+             documentRegistry.writeAsset(path, new Uint8Array(data));
+             if (onFileSync) onFileSync(path);
+             return;
+        }
+
+        documentRegistry.applyUpdate(path, new Uint8Array(data));
+        if (onFileSync) onFileSync(path);
       }),
       
       listen<{ path: string }>("sync-requested", async (e) => {

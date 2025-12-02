@@ -69,7 +69,10 @@ export const createHostAPI = (
           return await invoke<number[]>("read_file_content", { path: resolvePath(path) });
         },
         writeFile: async (path: string, content: number[]) => {
-          return await invoke("write_file_content", { path: resolvePath(path), content });
+          // 1. Write locally
+          await invoke("write_file_content", { path: resolvePath(path), content });
+          // 2. Broadcast to peers so they also have the file [FIX]
+          await invoke("broadcast_update", { path, data: content });
         },
         createDirectory: async (path: string) => {
           return await invoke("create_directory", { path: resolvePath(path) });
