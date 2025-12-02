@@ -5,9 +5,6 @@ import { transform } from "sucrase";
 import { WorkerClient } from "./worker/WorkerClient";
 import { createScopedAPI } from "./HostAPIImpl";
 
-// [PHASE 2] React removed from imports to prevent injection
-// Plugins must use the Data API.
-
 interface FileEntry {
   name: string;
   path: string;
@@ -19,6 +16,8 @@ class PluginLoaderService {
   private workerClient: WorkerClient | null = null;
   private allManifests: PluginManifest[] = [];
 
+  // ... [Existing discoverPlugins, isPluginEnabled, setPluginEnabled methods remain the same] ...
+  
   async discoverPlugins(pluginsRootPath: string): Promise<PluginManifest[]> {
     try {
       const entries = await invoke<FileEntry[]>("read_directory", { path: pluginsRootPath });
@@ -88,6 +87,14 @@ class PluginLoaderService {
     }
   }
 
+  // --- [PHASE 3] Data Bridge for UI ---
+  // This allows the React UI to ask the Worker for data via the loader singleton
+  public async requestTreeViewData(viewId: string, element?: any) {
+    if (!this.workerClient) return [];
+    // 'getChildren' is the standard call for the root or a branch
+    return this.workerClient.requestTreeData(viewId, 'getChildren', element);
+  }
+
   private async loadSinglePlugin(api: HostAPI, manifest: PluginManifest) {
     try {
       const root = (manifest as any)._rootPath;
@@ -111,7 +118,6 @@ class PluginLoaderService {
       }
 
       if (manifest.executionEnvironment === 'worker') {
-         // --- WORKER MODE ---
          console.log(`🚀 Loading ${manifest.name} in Worker...`);
          this.workerClient?.loadPlugin(manifest.id, code, manifest);
          
@@ -125,18 +131,14 @@ class PluginLoaderService {
          });
       }
       else {
-        // --- MAIN THREAD MODE (LEGACY / SIMPLE) ---
-        // Even in Main thread, we restrict access to React to enforce the Data Protocol in Phase 2
+        // [PHASE 3 Enforcement]
+        // Even if running in Main, we force the use of the generic API.
+        // We do NOT pass React to the plugin.
         const exports: any = {};
         const module = { exports };
         
         const syntheticRequire = (modName: string) => {
-          switch (modName) {
-            // [PHASE 2] React removed.
-            case "react": throw new Error("React is not available. Use api.window.createTreeView.");
-            case "react-dom": throw new Error("ReactDOM is not available.");
-            default: throw new Error(`Plugin ${manifest.id} requested unknown module ${modName}`);
-          }
+          throw new Error(`Module '${modName}' is not available. Use the Host API to define UI data.`);
         };
 
         const runPlugin = new Function("exports", "require", "module", "code", code);

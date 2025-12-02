@@ -1,10 +1,32 @@
 {
   "id": "plugin-manager",
   "name": "Plugin Manager",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Manage installed plugins.",
   "author": "System",
   "main": "index.tsx",
   "permissions": [],
-  "activationEvents": [ "onStartup" ]
+  "executionEnvironment": "worker",
+  "activationEvents": [
+    "onStartup"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "plugin-manager-bar",
+          "title": "Plugins",
+          "icon": "🧩"
+        }
+      ]
+    },
+    "views": {
+      "plugin-manager-bar": [
+        {
+          "id": "plugin-list",
+          "name": "Installed Plugins"
+        }
+      ]
+    }
+  }
 }

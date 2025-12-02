@@ -1,97 +1,91 @@
-import React, { useEffect, useState } from "react";
-
-const PluginManagerTab = (props: any) => {
-  const [plugins, setPlugins] = useState<any[]>([]);
-  const [needsReload, setNeedsReload] = useState(false);
-
-  // The 'props' passed to sidebar components are currently empty,
-  // but we can access the API via the global `window.CollabAPI` or 
-  // we can rely on the fact that this code runs in the main thread context
-  // where it can import the 'activate' context if we stored it. 
-  // However, simpler is to access the global we exposed in App.tsx for now
-  // or use the context closure if we had passed it.
-  
-  // Since sidebar tabs are React Components rendered by the Sidebar, 
-  // they don't automatically get the 'context' prop unless we change Sidebar.tsx.
-  // BUT, we can access the global HostAPI because we are in the same JS bundle (in 'main' mode).
-  
-  const api = (window as any).CollabAPI; 
-
-  useEffect(() => {
-    loadPlugins();
-  }, []);
-
-  const loadPlugins = async () => {
-    if (!api) return;
-    const list = await api.plugins.getAll();
-    const mapped = list.map((p: any) => ({
-        ...p,
-        enabled: api.plugins.isEnabled(p.id)
-    }));
-    setPlugins(mapped);
-  };
-
-  const togglePlugin = (id: string, currentStatus: boolean) => {
-    if (!api) return;
-    api.plugins.setEnabled(id, !currentStatus);
-    setNeedsReload(true);
-    // Optimistic update
-    setPlugins(prev => prev.map(p => 
-        p.id === id ? { ...p, enabled: !currentStatus } : p
-    ));
-  };
-
-  const handleReload = () => {
-    window.location.reload();
-  };
-
-  return (
-    <div style={{ padding: '10px', color: '#cdd6f4' }}>
-      <h3 style={{ borderBottom: '1px solid #313244', paddingBottom: '10px' }}>Extensions</h3>
-      
-      {needsReload && (
-        <div style={{ 
-            background: '#fab387', color: '#1e1e2e', padding: '8px', 
-            marginBottom: '10px', borderRadius: '4px', fontSize: '0.8rem',
-            display: 'flex', flexDirection: 'column', gap: '5px'
-        }}>
-           <span>Changes require reload.</span>
-           <button onClick={handleReload} style={{ cursor: 'pointer', padding: '4px', border: 'none', background: '#1e1e2e', color: 'white', borderRadius: '3px'}}>Reload Now</button>
-        </div>
-      )}
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {plugins.map(p => (
-            <div key={p.id} style={{ 
-                background: '#181825', border: '1px solid #313244', 
-                borderRadius: '6px', padding: '10px'
-            }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
-                    <strong style={{ fontSize: '0.9rem' }}>{p.name}</strong>
-                    <input 
-                        type="checkbox" 
-                        checked={p.enabled} 
-                        onChange={() => togglePlugin(p.id, p.enabled)}
-                        style={{ cursor: 'pointer' }}
-                        disabled={p.id === 'plugin-manager'} // Prevent disabling itself easily
-                    />
-                </div>
-                <div style={{ fontSize: '0.75rem', color: '#a6adc8', marginBottom: '5px' }}>{p.description}</div>
-                <div style={{ fontSize: '0.7rem', color: '#585b70' }}>v{p.version} • {p.author}</div>
-            </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
 export function activate(context: any) {
-  context.ui.registerSidebarTab({
-    id: "plugin-manager",
-    icon: "🧩",
-    label: "Plugins",
-    component: PluginManagerTab
+  const api = context;
+
+  // 1. Register Toggle Command
+  // This command is triggered when clicking the Status item in the tree.
+  api.commands.registerCommand("plugin-manager.toggle", (args: any[]) => {
+      const params = args[0];
+      if (!params) return;
+      
+      const { id, enabled } = params;
+      const newState = !enabled;
+      
+      // Update configuration
+      api.plugins.setEnabled(id, newState);
+      
+      // Notify user (Refresh is not yet supported by the engine, so reload is needed)
+      api.ui.showNotification(`Plugin '${id}' ${newState ? 'enabled' : 'disabled'}. Reload window to apply changes.`);
   });
+
+  // 2. Define Data Provider
+  // This supplies the data for the new "Installed Plugins" view.
+  const treeDataProvider = {
+      getChildren: async (element: any) => {
+          if (!element) {
+              // Root: List all installed plugins
+              const plugins = await api.plugins.getAll();
+              
+              return plugins.map((p: any) => ({
+                  type: 'plugin',
+                  manifest: p,
+                  enabled: api.plugins.isEnabled(p.id)
+              }));
+          }
+          
+          if (element.type === 'plugin') {
+              // Children: Details and Actions for a specific plugin
+              return [
+                  { type: 'detail', label: `Version: ${element.manifest.version}` },
+                  { type: 'detail', label: `Author: ${element.manifest.author}` },
+                  { type: 'detail', label: element.manifest.description || "No description" },
+                  { 
+                      type: 'action', 
+                      label: element.enabled ? "Status: Enabled (Click to Disable)" : "Status: Disabled (Click to Enable)",
+                      pluginId: element.manifest.id,
+                      enabled: element.enabled
+                  }
+              ];
+          }
+          return [];
+      },
+      
+      getTreeItem: (element: any) => {
+          if (element.type === 'plugin') {
+              return {
+                  label: element.manifest.name,
+                  description: element.manifest.version,
+                  collapsibleState: 'collapsed',
+                  icon: element.enabled ? '🧩' : '⚪',
+              };
+          }
+          
+          if (element.type === 'detail') {
+              return {
+                  label: element.label,
+                  collapsibleState: 'none',
+                  icon: '🔹'
+              };
+          }
+          
+          if (element.type === 'action') {
+              return {
+                  label: element.label,
+                  collapsibleState: 'none',
+                  icon: element.enabled ? '✅' : '❌',
+                  command: {
+                      command: 'plugin-manager.toggle',
+                      title: 'Toggle Plugin',
+                      arguments: [{ id: element.pluginId, enabled: element.enabled }]
+                  }
+              };
+          }
+          return {};
+      }
+  };
+
+  // 3. Register the Tree View
+  // The ID "plugin-list" matches the "views" entry in plugin.json
+  api.window.createTreeView("plugin-list", { treeDataProvider });
 }
 
 export function deactivate() {}

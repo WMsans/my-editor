@@ -6,5 +6,6 @@
   "author": "User",
   "main": "index.tsx",
   "permissions": [],
+  "executionEnvironment": "main",
   "activationEvents": [ "onStartup" ]
 }
