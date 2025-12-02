@@ -1,0 +1,10 @@
+{
+  "id": "vim-mode",
+  "name": "Vim Emulation",
+  "version": "0.1.0",
+  "description": "Basic Vim navigation and modes.",
+  "author": "User",
+  "main": "index.tsx",
+  "permissions": [],
+  "activationEvents": [ "onStartup" ]
+}

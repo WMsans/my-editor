@@ -3,6 +3,11 @@ import * as Y from "yjs";
 import { invoke } from "@tauri-apps/api/core"; 
 import { documentRegistry } from "./mod-engine/DocumentRegistry"; 
 
+// API & Registry
+import { registry } from "./mod-engine/Registry";
+import { createHostAPI } from "./mod-engine/HostAPIImpl";
+import { pluginLoader } from "./mod-engine/PluginLoader";
+
 // Logic Hooks
 import { useP2P } from "./hooks/useP2P";
 import { useHostNegotiation } from "./hooks/useHostNegotiation";
@@ -14,7 +19,7 @@ import { useEditorManager } from "./hooks/useEditorManager";
 import { MenuBar } from "./components/MenuBar";
 import { Settings } from "./components/Settings";
 import { WarningModal } from "./components/WarningModal";
-import { PasswordModal } from "./components/PasswordModal"; 
+import { PasswordModal } from "./components/PasswordModal";
 import { Sidebar } from "./components/Sidebar";
 import { EditorArea } from "./components/EditorArea";
 import "./App.css";
@@ -32,12 +37,17 @@ function App() {
   } | null>(null);
 
   // --- Encryption State ---
-  // [CHANGED] Removed localStorage default. Key is now project-lifecycle dependent.
-  const [encryptionKey, setEncryptionKey] = useState("");
+  const [encryptionKey, setEncryptionKey] = useState(localStorage.getItem("encryptionKey") || "");
   const encryptionKeyRef = useRef(encryptionKey);
-  
+
+  // --- App Lifecycle State ---
+  const [isAppReady, setIsAppReady] = useState(false);
+  const [loadError, setLoadError] = useState<string|null>(null);
+
+  // Sync Encryption Key Ref
   useEffect(() => {
     encryptionKeyRef.current = encryptionKey;
+    localStorage.setItem("encryptionKey", encryptionKey);
   }, [encryptionKey]);
 
   // --- Project & File System Hook ---
@@ -51,11 +61,6 @@ function App() {
     handleOpenFolder, handleNewFile, handleProjectReceived,
     getRelativePath
   } = useProject(setWarningMsg);
-
-  // Clear key when switching projects
-  useEffect(() => {
-      setEncryptionKey(""); 
-  }, [rootPath]);
 
   // --- P2P Callbacks ---
   const handleHostDisconnect = useCallback((hostId: string) => {
@@ -110,7 +115,7 @@ function App() {
   };
 
   // --- Host Negotiation Hook ---
-  const { updateProjectKey } = useHostNegotiation({
+  useHostNegotiation({
     rootPath,
     myPeerId,
     myAddresses,
@@ -146,6 +151,59 @@ function App() {
     isJoining,
     requestSync
   );
+
+  // --- [NEW] API & Plugin Initialization ---
+  const editorRef = useRef(editor);
+  useEffect(() => { editorRef.current = editor; }, [editor]);
+
+  useEffect(() => {
+    let isMounted = true; 
+
+    const initEngine = async () => {
+      try {
+        if (!isMounted) return;
+
+        // A. Setup Host API
+        const api = createHostAPI(
+          () => editorRef.current, 
+          () => rootPathRef.current,
+          setWarningMsg,
+          {
+            getAll: async () => pluginLoader.getAllManifests(),
+            isEnabled: (id) => pluginLoader.isPluginEnabled(id),
+            setEnabled: (id, val) => pluginLoader.setPluginEnabled(id, val)
+          }
+        );
+        // @ts-ignore
+        window.CollabAPI = api;
+        
+        // Clear registry before loading
+        registry.init(api);
+
+        // B. Discover & Load Plugins
+        const pluginsDir = "../plugins"; 
+        
+        const manifests = await pluginLoader.discoverPlugins(pluginsDir);
+        if (!isMounted) return; 
+
+        await pluginLoader.loadPlugins(api, manifests);
+        if (!isMounted) return; 
+
+        // C. Ready
+        setIsAppReady(true);
+      } catch (e: any) {
+        if (isMounted) setLoadError(e.toString());
+      }
+    };
+
+    initEngine();
+
+    // Cleanup: Cancel any pending loads
+    return () => {
+      isMounted = false;
+      pluginLoader.deactivateAll();
+    };
+  }, []); // Deps: Empty array (run once)
 
   useEffect(() => { setIsSyncingRef.current = setIsSyncing; }, [setIsSyncing]);
   useEffect(() => { if (showSettings) refreshRemoteOrigin(); }, [showSettings, refreshRemoteOrigin]);
@@ -188,6 +246,16 @@ function App() {
     }
   };
 
+  if (!isAppReady) {
+    return (
+      <div className="app-loading">
+        <h2>Initializing Collaboration Engine...</h2>
+        {loadError && <p style={{color: 'red'}}>Error: {loadError}</p>}
+        <div className="loader">Loading Plugins...</div>
+      </div>
+    );
+  }
+
   return (
     <div className="app-layout">
       <MenuBar 
@@ -205,12 +273,10 @@ function App() {
         sshKeyPath={sshKeyPath}
         setSshKeyPath={setSshKeyPath}
         encryptionKey={encryptionKey}
-        // [CHANGED] Pass the update handler instead of raw setter
-        updateProjectKey={updateProjectKey}
+        setEncryptionKey={setEncryptionKey}
         detectedRemote={detectedRemote}
       />
 
-      {/* Password Modal */}
       <PasswordModal 
         isOpen={!!passwordRequest}
         message={passwordRequest?.message || ""}

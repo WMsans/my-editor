@@ -1,0 +1,21 @@
+{
+  "id": "image-block",
+  "name": "Image",
+  "version": "0.1.0",
+  "description": "Embed images relative to the project.",
+  "author": "User",
+  "main": "index.tsx",
+  "permissions": ["filesystem"],
+  "activationEvents": [
+    "onStartup"
+  ],
+  "contributes": {
+    "slashMenu": [
+      {
+        "command": "image.insert",
+        "title": "Image",
+        "description": "Upload or insert an image"
+      }
+    ]
+  }
+}

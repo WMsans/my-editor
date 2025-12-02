@@ -66,7 +66,6 @@ export function useProject(setWarningMsg: (msg: string | null) => void) {
       }
     }
 
-    // 2. Replace setTimeout/prompt with native dialog
     try {
       const selected = await open({
         directory: true,
@@ -74,7 +73,6 @@ export function useProject(setWarningMsg: (msg: string | null) => void) {
         title: "Open Project Folder"
       });
 
-      // In Tauri v2, 'selected' is null if cancelled, or a string path
       if (selected && typeof selected === 'string') {
         setRootPath(selected);
         setFileSystemRefresh(prev => prev + 1);
@@ -102,7 +100,15 @@ export function useProject(setWarningMsg: (msg: string | null) => void) {
         silent = true; 
         isAutoJoining.current = false; 
     } else {
-        destPath = prompt("You joined a session! Enter absolute path to clone the project folder:");
+        // [FIX] Use native dialog to select folder instead of prompt
+        const selected = await open({
+            directory: true,
+            multiple: false,
+            title: "Select Destination for Shared Project"
+        });
+        if (selected && typeof selected === 'string') {
+            destPath = selected;
+        }
     }
 
     if (destPath) {
@@ -119,11 +125,13 @@ export function useProject(setWarningMsg: (msg: string | null) => void) {
         }
 
         if (!silent) alert(`Project cloned to ${destPath}`);
-      } catch (e) {
-        setWarningMsg("Failed to save incoming project: " + e);
+      } catch (e: any) {
+        setWarningMsg("Failed to save incoming project: " + e.toString());
+        throw e; // Rethrow to notify caller
       }
     } else {
       setWarningMsg("Sync cancelled: No destination folder selected.");
+      throw new Error("Cancelled by user");
     }
   }, [setWarningMsg]);
 

@@ -24,6 +24,12 @@ export function useP2P(
     isHostRef.current = isHost;
   }, [isHost]);
 
+  // [FIX] Add isJoiningRef to safely check joining state inside event listeners
+  const isJoiningRef = useRef(isJoining);
+  useEffect(() => {
+    isJoiningRef.current = isJoining;
+  }, [isJoining]);
+
   useEffect(() => {
     invoke<string>("get_local_peer_id").then(setMyPeerId).catch(() => {});
     
@@ -54,11 +60,24 @@ export function useP2P(
         setIncomingRequest(e.payload);
         setStatus(`Incoming request from ${e.payload.slice(0, 8)}...`);
       }),
-      listen<number[]>("join-accepted", (e) => {
-        onProjectReceived(e.payload);
-        setIsHost(false);
-        setIsJoining(false);
-        setStatus("Joined session! Folder synced.");
+      // [CHANGED] Safer join-accepted handler
+      listen<number[]>("join-accepted", async (e) => {
+        try {
+            // Force guest state immediately
+            setIsHost(false);
+            
+            // Handle file saving (this might block or take time)
+            await onProjectReceived(e.payload);
+            
+            setStatus("Joined session! Folder synced.");
+        } catch (err) {
+            console.error("Error receiving project:", err);
+            setStatus("Error syncing project folder.");
+        } finally {
+            // Ensure we exit joining state even if save fails
+            setIsJoining(false);
+            setIsHost(false); // Double check
+        }
       }),
       listen<string>("host-disconnected", (e) => {
         setStatus(`⚠ Host disconnected! Negotiating...`);
@@ -67,8 +86,28 @@ export function useP2P(
       }),
       
       listen<{ path: string, data: number[] }>("p2p-sync", (e) => {
-        documentRegistry.applyUpdate(e.payload.path, new Uint8Array(e.payload.data));
-        if (onFileSync) onFileSync(e.payload.path);
+        const { path, data } = e.payload;
+
+        // [FIX] Implicit Join Recovery
+        // If we receive sync data from the host, the connection is alive.
+        // If we were stuck in 'Requesting to join...', break out immediately.
+        if (isJoiningRef.current) {
+            console.log("Implicitly joined via sync packet.");
+            setIsJoining(false);
+            setIsHost(false);
+            setStatus("Joined session (Synced).");
+        }
+
+        // [FIX] Handle Binary Assets (Images, etc.)
+        // If it looks like an image or is in the resources folder, write directly to disk
+        if (path.match(/\.(png|jpg|jpeg|gif|svg|webp)$/i) || path.startsWith("resources/")) {
+             documentRegistry.writeAsset(path, new Uint8Array(data));
+             if (onFileSync) onFileSync(path);
+             return;
+        }
+
+        documentRegistry.applyUpdate(path, new Uint8Array(data));
+        if (onFileSync) onFileSync(path);
       }),
       
       listen<{ path: string }>("sync-requested", async (e) => {
@@ -139,6 +178,6 @@ export function useP2P(
     rejectRequest,
     requestSync,
     myAddresses,
-    connectedPeers // Export this
+    connectedPeers
   };
 }
