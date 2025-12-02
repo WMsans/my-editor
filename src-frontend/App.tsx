@@ -180,13 +180,20 @@ function App() {
         // Clear registry before loading
         registry.init(api);
 
-        // B. Discover & Load Plugins
+        // B. Discover Plugins
         const pluginsDir = "../plugins"; 
         
         const manifests = await pluginLoader.discoverPlugins(pluginsDir);
         if (!isMounted) return; 
 
+        // [CHANGED] Phase 1: Register Static Contributions first
+        // This populates UI icons/commands without running JS
+        await pluginLoader.registerStaticContributions(manifests);
+
+        // [OPTIONAL] We still load JS for now to maintain functionality
+        // but the architecture now supports static-only init.
         await pluginLoader.loadPlugins(api, manifests);
+        
         if (!isMounted) return; 
 
         // C. Ready

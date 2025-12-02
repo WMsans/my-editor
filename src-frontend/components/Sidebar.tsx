@@ -25,7 +25,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onRejectRequest
 }) => {
   const [activeTab, setActiveTab] = useState("files");
+  
+  // Legacy Tabs
   const pluginTabs = registry.getSidebarTabs();
+  
+  // [PHASE 1] Static Containers
+  const viewContainers = registry.getViewContainers();
 
   // Standard Panels
   const renderContent = () => {
@@ -54,11 +59,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
       );
     }
     
-    // Plugin Panels
+    // Legacy Plugin Panels (Loaded Components)
     const plugin = pluginTabs.find(t => t.id === activeTab);
     if (plugin) {
       const Component = plugin.component;
       return <div className="plugin-panel"><Component /></div>;
+    }
+
+    // [PHASE 1] Static Views (Data Driven)
+    const container = viewContainers.find(c => c.id === activeTab);
+    if (container) {
+        const views = registry.getViews(container.id);
+        return (
+            <div className="plugin-panel">
+                <div className="sidebar-header">{container.title.toUpperCase()}</div>
+                {views.length === 0 && <div className="sidebar-empty">No views registered.</div>}
+                
+                {views.map(view => (
+                    <div key={view.id} className="view-pane" style={{ borderTop: '1px solid #313244' }}>
+                        <div className="view-header" style={{ padding: '5px 15px', background: '#313244', fontSize: '0.8rem', fontWeight: 'bold' }}>
+                            {view.name.toUpperCase()}
+                        </div>
+                        <div className="view-content" style={{ padding: '10px' }}>
+                            <small style={{ color: '#6c7086' }}>
+                                View content not loaded (Phase 1)
+                            </small>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        );
     }
     
     return null;
@@ -87,7 +117,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           📡
         </div>
 
-        {/* Plugin Icons */}
+        {/* Legacy Plugin Icons */}
         {pluginTabs.map(tab => (
            <div 
              key={tab.id}
@@ -99,6 +129,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
              {tab.icon}
            </div>
         ))}
+
+        {/* [PHASE 1] Static View Containers */}
+        {viewContainers.map(container => (
+            <div
+             key={container.id}
+             className={`activity-icon ${activeTab === container.id ? 'active' : ''}`} 
+             onClick={() => setActiveTab(container.id)}
+             title={container.title}
+             style={{ cursor: 'pointer', padding: '10px', opacity: activeTab === container.id ? 1 : 0.5, fontSize: '1.2rem' }}
+           >
+             {container.icon}
+           </div>
+        ))}
+
       </div>
 
       {/* Side Panel Content */}

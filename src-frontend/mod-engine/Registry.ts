@@ -1,10 +1,19 @@
-import { Mod, SidebarTab, HostAPI } from "./types";
+import { Mod, SidebarTab, HostAPI, PluginManifest, ViewContainerContribution, ViewContribution } from "./types";
 
 interface SlashCommandDef {
     id: string; 
     command: string; 
     title: string;
     description: string;
+}
+
+// Internal storage wrappers
+interface RegisteredViewContainer extends ViewContainerContribution {
+    pluginId: string;
+}
+interface RegisteredView extends ViewContribution {
+    containerId: string;
+    pluginId: string;
 }
 
 class Registry {
@@ -16,6 +25,10 @@ class Registry {
   private sidebarTabs: SidebarTab[] = [];
   private slashCommands: SlashCommandDef[] = [];
   
+  // [PHASE 1] Static Contributions
+  private viewContainers: RegisteredViewContainer[] = [];
+  private views: Map<string, RegisteredView[]> = new Map(); // containerId -> views[]
+
   // Command Handlers
   private commandHandlers = new Map<string, (args?: any) => void>();
   
@@ -24,14 +37,62 @@ class Registry {
   init(api: HostAPI) {
     this.api = api;
     this.dynamicExtensions = [];
-    this.highPriorityExtensions = []; // Clear high priority
+    this.highPriorityExtensions = []; 
     this.sidebarTabs = [];
     this.slashCommands = [];
     this.commandHandlers.clear();
+    
+    // Clear Static
+    this.viewContainers = [];
+    this.views.clear();
   }
 
+  // --- [PHASE 1] Static Registration ---
+  registerManifest(manifest: PluginManifest) {
+    if (!manifest.contributes) return;
+
+    // 1. Slash Commands (Static)
+    if (manifest.contributes.slashMenu) {
+        manifest.contributes.slashMenu.forEach(cmd => {
+            this.registerSlashCommand({
+                id: manifest.id,
+                command: cmd.command,
+                title: cmd.title,
+                description: cmd.description
+            });
+        });
+    }
+
+    // 2. View Containers (Activity Bar)
+    if (manifest.contributes.viewsContainers?.activitybar) {
+        manifest.contributes.viewsContainers.activitybar.forEach(vc => {
+            this.viewContainers.push({
+                ...vc,
+                pluginId: manifest.id
+            });
+        });
+    }
+
+    // 3. Views (Side Panels)
+    if (manifest.contributes.views) {
+        for (const [containerId, viewList] of Object.entries(manifest.contributes.views)) {
+            if (!this.views.has(containerId)) {
+                this.views.set(containerId, []);
+            }
+            const registeredViews = viewList.map(v => ({ 
+                ...v, 
+                containerId, 
+                pluginId: manifest.id 
+            }));
+            this.views.get(containerId)!.push(...registeredViews);
+        }
+    }
+  }
+
+  getViewContainers() { return this.viewContainers; }
+  getViews(containerId: string) { return this.views.get(containerId) || []; }
+
   // --- Extension Management ---
-  // [CHANGED] Accept priority
   registerExtension(ext: any, priority: 'high' | 'normal' = 'normal') {
     if (priority === 'high') {
         this.highPriorityExtensions.push(ext);
@@ -44,12 +105,10 @@ class Registry {
     return this.dynamicExtensions;
   }
 
-  // [NEW]
   getHighPriorityExtensions() {
     return this.highPriorityExtensions;
   }
 
-  // ... (keep rest of file: registerSlashCommand, etc.)
   registerSlashCommand(cmd: SlashCommandDef) {
     const exists = this.slashCommands.some(
       (existing) => existing.id === cmd.id && existing.command === cmd.command

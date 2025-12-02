@@ -28,6 +28,25 @@ export interface SidebarTab {
   component: React.FC<any>;
 }
 
+// [PHASE 1] New Contribution Types
+export interface CommandContribution {
+    command: string;
+    title: string;
+    category?: string;
+}
+
+export interface ViewContainerContribution {
+    id: string;
+    title: string;
+    icon: string; // Emoji or icon name
+}
+
+export interface ViewContribution {
+    id: string;
+    name: string;
+    type?: string; 
+}
+
 export interface HostAPI {
   editor: {
     registerExtension: (ext: Node | Extension, options?: { priority?: 'high' | 'normal' }) => void;
@@ -52,7 +71,6 @@ export interface HostAPI {
       createDirectory: (path: string) => Promise<void>; 
     }
   };
-  // [NEW] Plugin Management API
   plugins: {
     getAll: () => Promise<PluginManifest[]>;
     isEnabled: (id: string) => boolean;
@@ -66,16 +84,17 @@ export interface PluginManifest {
   version: string;
   main: string;
   permissions?: string[];
-  
-  /**
-   * Defines where the plugin runs.
-   * - 'main': Runs in UI thread (Access to React/Tiptap). Risks freezing UI.
-   * - 'worker': Runs in background Worker. Safe, but limited UI access.
-   * @default 'main'
-   */
   executionEnvironment?: 'main' | 'worker'; 
 
+  // [PHASE 1] Contributes Section
   contributes?: {
+    commands?: CommandContribution[];
+    viewsContainers?: {
+      activitybar?: ViewContainerContribution[];
+    };
+    views?: {
+      [containerId: string]: ViewContribution[];
+    };
     slashMenu?: Array<{ command: string; title: string; description: string }>;
   };
 }

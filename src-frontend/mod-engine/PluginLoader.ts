@@ -20,7 +20,7 @@ interface FileEntry {
 class PluginLoaderService {
   private activePlugins: Map<string, ActivePlugin> = new Map();
   private workerClient: WorkerClient | null = null;
-  private allManifests: PluginManifest[] = []; // [NEW] Store all discovered plugins
+  private allManifests: PluginManifest[] = [];
 
   async discoverPlugins(pluginsRootPath: string): Promise<PluginManifest[]> {
     try {
@@ -43,7 +43,7 @@ class PluginLoaderService {
           }
         }
       }
-      this.allManifests = manifests; // [NEW] Save for listing later
+      this.allManifests = manifests;
       return manifests;
     } catch (e) {
       console.error("Failed to scan plugins directory:", e);
@@ -51,13 +51,11 @@ class PluginLoaderService {
     }
   }
 
-  // [NEW] Helper to check persistent storage
   isPluginEnabled(id: string): boolean {
     const disabled = JSON.parse(localStorage.getItem("disabled_plugins") || "[]");
     return !disabled.includes(id);
   }
 
-  // [NEW] Helper to set persistent storage
   setPluginEnabled(id: string, enabled: boolean) {
     let disabled = JSON.parse(localStorage.getItem("disabled_plugins") || "[]");
     if (enabled) {
@@ -70,14 +68,21 @@ class PluginLoaderService {
   
   getAllManifests() { return this.allManifests; }
 
+  // [PHASE 1] Static Registration
+  async registerStaticContributions(manifests: PluginManifest[]) {
+    for (const manifest of manifests) {
+        if (this.isPluginEnabled(manifest.id)) {
+            registry.registerManifest(manifest);
+        }
+    }
+  }
+
   async loadPlugins(api: HostAPI, manifests: PluginManifest[]) {
-    // Initialize Worker Client if needed
     if (!this.workerClient) {
         this.workerClient = new WorkerClient(api);
     }
 
     for (const manifest of manifests) {
-      // [NEW] Skip disabled plugins
       if (!this.isPluginEnabled(manifest.id)) {
           console.log(`⏸️ Plugin '${manifest.id}' is disabled.`);
           continue;
@@ -111,22 +116,10 @@ class PluginLoaderService {
       if (manifest.executionEnvironment === 'worker') {
          // --- WORKER MODE ---
          console.log(`🚀 Loading ${manifest.name} in Worker...`);
-         
-         // In worker mode, we don't pass the main API. The worker client handles bridging.
          this.workerClient?.loadPlugin(manifest.id, code, manifest);
          
-         // Register Slash Commands (Manifest only)
-         // The Worker will register the handler via RPC "REGISTER_COMMAND_PROXY"
-         if (manifest.contributes?.slashMenu) {
-            manifest.contributes.slashMenu.forEach(item => {
-                registry.registerSlashCommand({
-                    id: manifest.id,
-                    command: item.command,
-                    title: item.title,
-                    description: item.description
-                });
-            });
-         }
+         // [CHANGED] Slash Menu registration moved to registerStaticContributions
+         // Worker will still register command handlers via RPC
 
          this.activePlugins.set(manifest.id, {
              manifest,
@@ -137,7 +130,7 @@ class PluginLoaderService {
              }
          });
       }
-      else{
+      else {
         const exports: any = {};
         const module = { exports };
         
@@ -156,22 +149,10 @@ class PluginLoaderService {
         runPlugin(exports, syntheticRequire, module, React);
 
         if (exports.activate && typeof exports.activate === 'function') {
-          // [NEW] Create scoped API based on manifest permissions
           const scopedApi = createScopedAPI(api, manifest.id, manifest.permissions || []);
-          
-          // Pass scoped API instead of global API
           exports.activate(scopedApi);
           
-          if (manifest.contributes?.slashMenu) {
-              manifest.contributes.slashMenu.forEach(item => {
-                  registry.registerSlashCommand({
-                      id: manifest.id,
-                      command: item.command,
-                      title: item.title,
-                      description: item.description
-                  });
-              });
-          }
+          // [CHANGED] Slash Menu registration moved to registerStaticContributions
 
           this.activePlugins.set(manifest.id, {
             manifest,
