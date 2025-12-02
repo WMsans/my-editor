@@ -57,10 +57,13 @@ export function useP2P(
       // [CHANGED] Safer join-accepted handler
       listen<number[]>("join-accepted", async (e) => {
         try {
+            // [FIX] Update status immediately so user knows to look for the dialog window
+            setStatus("Accepted. Please select a destination folder...");
+
             // Force guest state immediately
             setIsHost(false);
             
-            // Handle file saving (this might block or take time)
+            // Handle file saving (this might block waiting for User Input)
             await onProjectReceived(e.payload);
             
             setStatus("Joined session! Folder synced.");
@@ -68,7 +71,7 @@ export function useP2P(
             console.error("Error receiving project:", err);
             setStatus("Error syncing project folder.");
         } finally {
-            // Ensure we exit joining state even if save fails
+            // Ensure we exit joining state even if save fails or is cancelled
             setIsJoining(false);
             setIsHost(false); // Double check
         }
