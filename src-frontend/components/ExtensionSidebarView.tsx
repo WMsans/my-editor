@@ -1,18 +1,17 @@
 import React, { useState, useEffect } from "react";
 import { pluginLoader } from "../mod-engine/PluginLoader";
-import { TreeItem } from "../mod-engine/types";
 import { registry } from "../mod-engine/Registry";
 
 // --- The Recursive Node Component ---
 const GenericTreeItem: React.FC<{
   viewId: string;
-  item: TreeItem;
+  item: any; // Changed from TreeItem to any to handle hybrid data+UI object
   depth: number;
 }> = ({ viewId, item, depth }) => {
   const [expanded, setExpanded] = useState(
     item.collapsibleState === "expanded"
   );
-  const [children, setChildren] = useState<TreeItem[]>([]);
+  const [children, setChildren] = useState<any[]>([]); // Changed to any[]
   const [loading, setLoading] = useState(false);
 
   const isExpandable =
@@ -22,9 +21,17 @@ const GenericTreeItem: React.FC<{
   const fetchChildren = async () => {
     setLoading(true);
     try {
-      const data = await pluginLoader.requestTreeViewData(viewId, item);
-      if (Array.isArray(data)) {
-        setChildren(data);
+      // 1. Get raw data children
+      const rawChildren = await pluginLoader.requestTreeViewData(viewId, item);
+      
+      if (Array.isArray(rawChildren)) {
+        // 2. Resolve UI properties for each child
+        const resolved = await Promise.all(rawChildren.map(async (child: any) => {
+            const ui = await pluginLoader.resolveTreeItem(viewId, child);
+            // Merge raw data (for logic) with UI properties (for display)
+            return { ...child, ...ui };
+        }));
+        setChildren(resolved);
       }
     } catch (e) {
       console.error("Failed to fetch tree children", e);
@@ -92,7 +99,7 @@ export const ExtensionSidebarView: React.FC<ExtensionSidebarViewProps> = ({
   viewId,
   name,
 }) => {
-  const [rootItems, setRootItems] = useState<TreeItem[]>([]);
+  const [rootItems, setRootItems] = useState<any[]>([]); // Changed to any[]
   const [error, setError] = useState<string | null>(null);
 
   // Initial Load (Root Level)
@@ -100,10 +107,18 @@ export const ExtensionSidebarView: React.FC<ExtensionSidebarViewProps> = ({
     let mounted = true;
     const loadRoot = async () => {
       try {
-        // Fetch root (undefined element)
-        const data = await pluginLoader.requestTreeViewData(viewId);
+        // 1. Fetch root raw objects
+        const rawRoots = await pluginLoader.requestTreeViewData(viewId);
+        
         if (mounted) {
-            if (Array.isArray(data)) setRootItems(data);
+            if (Array.isArray(rawRoots)) {
+                // 2. Resolve UI properties
+                const resolved = await Promise.all(rawRoots.map(async (child: any) => {
+                    const ui = await pluginLoader.resolveTreeItem(viewId, child);
+                    return { ...child, ...ui };
+                }));
+                setRootItems(resolved);
+            }
         }
       } catch (e: any) {
         if (mounted) setError(e.toString());

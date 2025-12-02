@@ -16,7 +16,7 @@ class PluginLoaderService {
   private workerClient: WorkerClient | null = null;
   private allManifests: PluginManifest[] = [];
 
-  // ... [Existing discoverPlugins, isPluginEnabled, setPluginEnabled methods remain the same] ...
+  // ... [Existing discoverPlugins, isPluginEnabled, setPluginEnabled methods remain unchanged] ...
   
   async discoverPlugins(pluginsRootPath: string): Promise<PluginManifest[]> {
     try {
@@ -64,7 +64,6 @@ class PluginLoaderService {
   
   getAllManifests() { return this.allManifests; }
 
-  // [PHASE 1] Static Registration
   async registerStaticContributions(manifests: PluginManifest[]) {
     for (const manifest of manifests) {
         if (this.isPluginEnabled(manifest.id)) {
@@ -88,11 +87,17 @@ class PluginLoaderService {
   }
 
   // --- [PHASE 3] Data Bridge for UI ---
-  // This allows the React UI to ask the Worker for data via the loader singleton
+
   public async requestTreeViewData(viewId: string, element?: any) {
     if (!this.workerClient) return [];
-    // 'getChildren' is the standard call for the root or a branch
+    // 'getChildren' returns the raw data objects
     return this.workerClient.requestTreeData(viewId, 'getChildren', element);
+  }
+
+  // [NEW] Resolve the UI representation (label, icon) for a data element
+  public async resolveTreeItem(viewId: string, element: any) {
+    if (!this.workerClient) return {};
+    return this.workerClient.requestTreeData(viewId, 'getTreeItem', element);
   }
 
   private async loadSinglePlugin(api: HostAPI, manifest: PluginManifest) {
@@ -131,28 +136,19 @@ class PluginLoaderService {
          });
       }
       else {
-        // [PHASE 3 Enforcement]
-        // Even if running in Main, we force the use of the generic API.
-        // We do NOT pass React to the plugin.
+        // Main thread logic (omitted for brevity, largely unused for worker plugins)
         const exports: any = {};
         const module = { exports };
-        
         const syntheticRequire = (modName: string) => {
-          throw new Error(`Module '${modName}' is not available. Use the Host API to define UI data.`);
+          throw new Error(`Module '${modName}' is not available. Use the Host API.`);
         };
-
         const runPlugin = new Function("exports", "require", "module", "code", code);
         runPlugin(exports, syntheticRequire, module, code);
 
         if (exports.activate && typeof exports.activate === 'function') {
           const scopedApi = createScopedAPI(api, manifest.id, manifest.permissions || []);
           exports.activate(scopedApi);
-          
-          this.activePlugins.set(manifest.id, {
-            manifest,
-            instance: exports,
-          });
-          console.log(`✅ Plugin Activated: ${manifest.name}`);
+          this.activePlugins.set(manifest.id, { manifest, instance: exports });
         }
       }
     } catch (e) {
