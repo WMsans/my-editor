@@ -30,7 +30,8 @@ const ImageComponent = (props: any) => {
         return;
     }
 
-    const loadImage = async () => {
+    // [FIX] Retry mechanism for handling P2P file sync latency
+    const loadImage = async (retries = 10) => {
         if(!api) return;
         setLoading(true);
         setError(null);
@@ -44,10 +45,23 @@ const ImageComponent = (props: any) => {
             const blob = new Blob([u8]); // We let browser sniff mime or default
             const url = URL.createObjectURL(blob);
             setImageUrl(url);
+            setLoading(false);
         } catch (e: any) {
-            if (active) setError("Failed to load image: " + e.toString());
-        } finally {
-            if (active) setLoading(false);
+            if (!active) return;
+
+            // Check if file is missing (os error 2) and we have retries left
+            // This happens when the doc update arrives before the file sync
+            const isFileNotFound = e.toString().includes("os error 2") || 
+                                   e.toString().includes("no such file") ||
+                                   e.toString().includes("No such file");
+
+            if (isFileNotFound && retries > 0) {
+                console.log(`Image not found yet (${src}), retrying... attempts left: ${retries}`);
+                setTimeout(() => loadImage(retries - 1), 1000);
+            } else {
+                setError("Failed to load image: " + e.toString());
+                setLoading(false);
+            }
         }
     };
 
