@@ -1,9 +1,13 @@
-import { WorkerMessage, MainMessage, ApiRequestPayload, ApiResponsePayload } from "./messages";
+import { WorkerMessage, MainMessage, ApiRequestPayload, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload } from "./messages";
+import { HostAPI, TreeDataProvider, TreeItem } from "../types";
 
 // --- State ---
 const commandHandlers = new Map<string, Function>();
 const pendingRequests = new Map<string, { resolve: Function, reject: Function }>();
 const activeWorkerPlugins = new Map<string, any>();
+
+// [PHASE 2] UI Data Providers
+const treeDataProviders = new Map<string, TreeDataProvider<any>>();
 
 // --- Helper: Send to Main ---
 const postToMain = (msg: MainMessage) => {
@@ -14,7 +18,7 @@ const postToMain = (msg: MainMessage) => {
 const uuid = () => Math.random().toString(36).substring(2, 15);
 
 // --- API Proxy Factory ---
-const createWorkerAPI = (pluginId: string) => {
+const createWorkerAPI = (pluginId: string): HostAPI => {
     // Generic proxy for async methods
     const callMain = (module: string, method: string, ...args: any[]) => {
         return new Promise((resolve, reject) => {
@@ -34,29 +38,69 @@ const createWorkerAPI = (pluginId: string) => {
     };
 
     return {
-        // UI: Limited in Worker
+        // [PHASE 2] Window API (Data Driven)
+        window: {
+            createTreeView: (viewId, options) => {
+                console.log(`[Worker] Registering TreeView: ${viewId}`);
+                treeDataProviders.set(viewId, options.treeDataProvider);
+                
+                // Notify Main thread that this view is now backed by data
+                postToMain({ 
+                    type: 'TREE_VIEW_REGISTER', 
+                    payload: { viewId, pluginId } 
+                });
+
+                return {
+                    dispose: () => treeDataProviders.delete(viewId),
+                    reveal: async (element, options) => {
+                        // Not implemented in Phase 2
+                    }
+                };
+            },
+            showInformationMessage: (message, ...items) => {
+                // @ts-ignore
+                return callMain('ui', 'showNotification', message) as Promise<string | undefined>; 
+            }
+        },
+        
+        // UI: Legacy / Limited
         ui: {
             showNotification: (msg: string) => callMain('ui', 'showNotification', msg),
-            registerSidebarTab: () => console.warn(`[${pluginId}] Sidebar tabs not supported in worker mode.`)
+            registerSidebarTab: () => console.warn(`[${pluginId}] Sidebar tabs not supported in worker mode. Use window.createTreeView.`)
         },
+        
         // Commands: Local handler + Remote registration
         commands: {
-            registerCommand: (id: string, handler: Function) => {
+            registerCommand: (id: string, handler: (args: any) => void) => {
                 commandHandlers.set(id, handler);
                 // Tell main thread to forward execution here
                 postToMain({ type: 'REGISTER_COMMAND_PROXY', payload: { id, pluginId } });
             },
             executeCommand: (id: string, args?: any) => callMain('commands', 'executeCommand', id, args)
         },
+        
+        editor: {
+            // Stubbed for Types; Workers can't access Editor directly yet
+            registerExtension: () => {},
+            getCommands: () => ({}),
+            getState: () => null,
+            getSafeInstance: () => null,
+        },
+
         // Data: Proxied to Main
         data: {
             fs: {
-                readFile: (path: string) => callMain('data.fs', 'readFile', path),
-                writeFile: (path: string, content: number[]) => callMain('data.fs', 'writeFile', path, content)
+                readFile: (path: string) => callMain('data.fs', 'readFile', path) as Promise<number[]>,
+                writeFile: (path: string, content: number[]) => callMain('data.fs', 'writeFile', path, content) as Promise<void>,
+                createDirectory: (path: string) => callMain('data.fs', 'createDirectory', path) as Promise<void>
             },
-            // YJS Docs are complex to proxy perfectly. 
-            // Simplified: Workers might work on snapshots or raw data in this v1.
-            getDoc: () => { throw new Error("Direct Y.Doc access not available in Worker yet."); }
+            getDoc: () => { throw new Error("Direct Y.Doc access not available in Worker yet."); },
+            getMap: (name) => { throw new Error("Direct Y.Map access not available in Worker yet."); }
+        },
+        plugins: {
+             getAll: () => callMain('plugins', 'getAll') as Promise<any>,
+             isEnabled: () => true, // Sync check difficult in worker
+             setEnabled: (id, val) => callMain('plugins', 'setEnabled', id, val)
         }
     };
 };
@@ -74,9 +118,11 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 const exports: any = {};
                 const module = { exports };
                 
-                // No React/Tiptap access in Worker
+                // [PHASE 2] Remove React/DOM injection
+                // We intentionally do NOT pass React, ReactDOM, or Tiptap.
+                // Plugins must use the API to define UI.
                 const syntheticRequire = (mod: string) => {
-                    throw new Error(`Module '${mod}' is not available in Worker environment.`);
+                    throw new Error(`Module '${mod}' is not available in Worker environment. Use the Host API.`);
                 };
 
                 const runPlugin = new Function("exports", "require", "module", "api", code);
@@ -100,7 +146,6 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             if (instance && instance.deactivate) {
                 try {
                     await instance.deactivate();
-                    postToMain({ type: 'LOG', payload: { level: 'info', message: `Worker Plugin '${pluginId}' deactivated.` } });
                 } catch (e: any) {
                     console.error(`Error deactivating ${pluginId}:`, e);
                 }
@@ -130,6 +175,31 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 else pending.reject(new Error(error));
                 pendingRequests.delete(requestId);
             }
+            break;
+        }
+
+        // [PHASE 2] Handle Tree View Data Requests
+        case 'TREE_VIEW_REQUEST': {
+            const { requestId, viewId, action, element } = payload as TreeViewRequestPayload;
+            const provider = treeDataProviders.get(viewId);
+            
+            const response: TreeViewResponsePayload = { requestId, data: null };
+
+            if (!provider) {
+                response.error = `No provider found for view ${viewId}`;
+            } else {
+                try {
+                    if (action === 'getChildren') {
+                        response.data = await provider.getChildren(element);
+                    } else if (action === 'getTreeItem') {
+                        response.data = await provider.getTreeItem(element);
+                    }
+                } catch (e: any) {
+                    response.error = e.toString();
+                }
+            }
+
+            postToMain({ type: 'TREE_VIEW_RESPONSE', payload: response });
             break;
         }
     }

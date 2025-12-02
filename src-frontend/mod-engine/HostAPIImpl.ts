@@ -1,4 +1,4 @@
-import { HostAPI, PluginManifest } from "./types";
+import { HostAPI, PluginManifest, TreeViewOptions, TreeView } from "./types";
 import { Editor } from "@tiptap/react";
 import { registry } from "./Registry";
 import { invoke } from "@tauri-apps/api/core";
@@ -27,6 +27,27 @@ export const createHostAPI = (
   };
 
   return {
+    // [PHASE 2] Window API Implementation for Main Thread
+    window: {
+      createTreeView: <T>(viewId: string, options: TreeViewOptions<T>): TreeView<T> => {
+        console.log(`[Main] TreeView registered: ${viewId}`);
+        // In the future, this would register the provider with a UI Registry 
+        // that the Sidebar component subscribes to.
+        return {
+          dispose: () => console.log(`[Main] TreeView disposed: ${viewId}`),
+          reveal: async (element, options) => {
+            console.log(`[Main] Reveal requested for ${viewId}`, element);
+          }
+        };
+      },
+      showInformationMessage: async (message: string, ...items: string[]) => {
+        // Maps to existing UI notification for now
+        setWarningMsg(message);
+        // If we implemented buttons (items), we would return the selected one here
+        return undefined;
+      }
+    },
+
     editor: {
       getSafeInstance: () => getEditor(),
       getCommands: () => getEditor()?.commands || null,
@@ -79,7 +100,6 @@ export const createHostAPI = (
         }
       }
     },
-    // [NEW] Plugin Management
     plugins: {
         getAll: async () => pluginManager ? pluginManager.getAll() : [],
         isEnabled: (id) => pluginManager ? pluginManager.isEnabled(id) : true,

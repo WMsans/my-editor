@@ -1,10 +1,13 @@
 import { HostAPI } from "../types";
-import { MainMessage, WorkerMessage, ApiResponsePayload } from "./messages";
+import { MainMessage, WorkerMessage, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload } from "./messages";
 import { registry } from "../Registry";
 
 export class WorkerClient {
     private worker: Worker;
     private api: HostAPI;
+    
+    // [PHASE 2] Request Tracking
+    private pendingDataRequests = new Map<string, { resolve: Function, reject: Function }>();
 
     constructor(api: HostAPI) {
         this.api = api;
@@ -31,6 +34,20 @@ export class WorkerClient {
         this.worker.postMessage(msg);
     }
 
+    // [PHASE 2] Public Method for UI Components to fetch data
+    public requestTreeData(viewId: string, action: 'getChildren' | 'getTreeItem', element?: any): Promise<any> {
+        return new Promise((resolve, reject) => {
+            const requestId = Math.random().toString(36).substring(7);
+            this.pendingDataRequests.set(requestId, { resolve, reject });
+
+            const msg: WorkerMessage = {
+                type: 'TREE_VIEW_REQUEST',
+                payload: { requestId, viewId, action, element }
+            };
+            this.worker.postMessage(msg);
+        });
+    }
+
     private async handleMessage(e: MessageEvent<MainMessage>) {
         const { type, payload } = e.data;
 
@@ -40,7 +57,6 @@ export class WorkerClient {
                 break;
 
             case 'REGISTER_COMMAND_PROXY':
-                // Register a command in the Main registry that forwards to the Worker
                 registry.registerCommand(payload.id, (args) => {
                     const msg: WorkerMessage = {
                         type: 'EXEC_COMMAND',
@@ -53,6 +69,24 @@ export class WorkerClient {
             case 'API_REQUEST':
                 await this.handleApiRequest(payload);
                 break;
+            
+            // [PHASE 2]
+            case 'TREE_VIEW_REGISTER':
+                console.log(`[WorkerClient] View registered: ${payload.viewId} (Plugin: ${payload.pluginId})`);
+                // Here we could register this provider in a MainRegistry so the Sidebar knows it can query it.
+                // For now, we assume the ViewContainer Registry knows the ID, and the UI will call 'requestTreeData'.
+                break;
+
+            case 'TREE_VIEW_RESPONSE': {
+                const { requestId, data, error } = payload as TreeViewResponsePayload;
+                const req = this.pendingDataRequests.get(requestId);
+                if (req) {
+                    if (error) req.reject(new Error(error));
+                    else req.resolve(data);
+                    this.pendingDataRequests.delete(requestId);
+                }
+                break;
+            }
         }
     }
 
@@ -77,6 +111,9 @@ export class WorkerClient {
             } else if (module === 'commands') {
                  // @ts-ignore
                 result = this.api.commands[method](...args);
+            } else if (module === 'plugins') {
+                // @ts-ignore
+                result = await this.api.plugins[method](...args);
             } else {
                 throw new Error(`Module ${module} not accessible from worker`);
             }

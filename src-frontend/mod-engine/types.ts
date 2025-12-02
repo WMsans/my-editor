@@ -19,7 +19,38 @@ export interface Mod {
   component?: React.FC<BlockProps>;
 }
 
-// --- NEW Plugin API Types ---
+// --- NEW Plugin API Types (Phase 2) ---
+
+export interface TreeItem {
+  id?: string;
+  label: string;
+  collapsibleState?: 'none' | 'collapsed' | 'expanded';
+  icon?: string; // emoji or identifier
+  description?: string;
+  tooltip?: string;
+  contextValue?: string;
+  command?: {
+      command: string;
+      title: string;
+      arguments?: any[];
+  };
+}
+
+export interface TreeDataProvider<T = any> {
+    getChildren(element?: T): Promise<T[]>;
+    getTreeItem(element: T): Promise<TreeItem> | TreeItem;
+}
+
+export interface TreeViewOptions<T> {
+    treeDataProvider: TreeDataProvider<T>;
+}
+
+export interface TreeView<T> {
+    dispose(): void;
+    reveal(element: T, options?: { select?: boolean; focus?: boolean; expand?: boolean | number }): Promise<void>;
+}
+
+// --- Contribution Types ---
 
 export interface SidebarTab {
   id: string;
@@ -28,7 +59,6 @@ export interface SidebarTab {
   component: React.FC<any>;
 }
 
-// [PHASE 1] New Contribution Types
 export interface CommandContribution {
     command: string;
     title: string;
@@ -38,7 +68,7 @@ export interface CommandContribution {
 export interface ViewContainerContribution {
     id: string;
     title: string;
-    icon: string; // Emoji or icon name
+    icon: string;
 }
 
 export interface ViewContribution {
@@ -48,6 +78,12 @@ export interface ViewContribution {
 }
 
 export interface HostAPI {
+  // [PHASE 2] Window / UI API (Data Driven)
+  window: {
+      createTreeView: <T>(viewId: string, options: TreeViewOptions<T>) => TreeView<T>;
+      showInformationMessage: (message: string, ...items: string[]) => Promise<string | undefined>;
+  };
+  
   editor: {
     registerExtension: (ext: Node | Extension, options?: { priority?: 'high' | 'normal' }) => void;
     getCommands: () => any; 
@@ -55,6 +91,7 @@ export interface HostAPI {
     getSafeInstance: () => Editor | null;
   };
   ui: {
+    // Deprecated in favor of window.createTreeView for new plugins
     registerSidebarTab: (tab: SidebarTab) => void;
     showNotification: (msg: string) => void;
   };
@@ -86,7 +123,6 @@ export interface PluginManifest {
   permissions?: string[];
   executionEnvironment?: 'main' | 'worker'; 
 
-  // [PHASE 1] Contributes Section
   contributes?: {
     commands?: CommandContribution[];
     viewsContainers?: {

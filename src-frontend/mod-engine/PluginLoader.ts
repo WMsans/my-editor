@@ -5,11 +5,8 @@ import { transform } from "sucrase";
 import { WorkerClient } from "./worker/WorkerClient";
 import { createScopedAPI } from "./HostAPIImpl";
 
-import * as React from "react";
-import * as ReactDOM from "react-dom";
-import * as TiptapReact from "@tiptap/react";
-import * as TiptapCore from "@tiptap/core";
-import * as PMState from "@tiptap/pm/state";
+// [PHASE 2] React removed from imports to prevent injection
+// Plugins must use the Data API.
 
 interface FileEntry {
   name: string;
@@ -118,9 +115,6 @@ class PluginLoaderService {
          console.log(`🚀 Loading ${manifest.name} in Worker...`);
          this.workerClient?.loadPlugin(manifest.id, code, manifest);
          
-         // [CHANGED] Slash Menu registration moved to registerStaticContributions
-         // Worker will still register command handlers via RPC
-
          this.activePlugins.set(manifest.id, {
              manifest,
              instance: { 
@@ -131,29 +125,27 @@ class PluginLoaderService {
          });
       }
       else {
+        // --- MAIN THREAD MODE (LEGACY / SIMPLE) ---
+        // Even in Main thread, we restrict access to React to enforce the Data Protocol in Phase 2
         const exports: any = {};
         const module = { exports };
         
         const syntheticRequire = (modName: string) => {
           switch (modName) {
-            case "react": return React;
-            case "react-dom": return ReactDOM;
-            case "@tiptap/react": return TiptapReact;
-            case "@tiptap/core": return TiptapCore;
-            case "@tiptap/pm/state": return PMState;
+            // [PHASE 2] React removed.
+            case "react": throw new Error("React is not available. Use api.window.createTreeView.");
+            case "react-dom": throw new Error("ReactDOM is not available.");
             default: throw new Error(`Plugin ${manifest.id} requested unknown module ${modName}`);
           }
         };
 
-        const runPlugin = new Function("exports", "require", "module", "React", code);
-        runPlugin(exports, syntheticRequire, module, React);
+        const runPlugin = new Function("exports", "require", "module", "code", code);
+        runPlugin(exports, syntheticRequire, module, code);
 
         if (exports.activate && typeof exports.activate === 'function') {
           const scopedApi = createScopedAPI(api, manifest.id, manifest.permissions || []);
           exports.activate(scopedApi);
           
-          // [CHANGED] Slash Menu registration moved to registerStaticContributions
-
           this.activePlugins.set(manifest.id, {
             manifest,
             instance: exports,
