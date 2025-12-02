@@ -24,6 +24,12 @@ export function useP2P(
     isHostRef.current = isHost;
   }, [isHost]);
 
+  // [FIX] Add isJoiningRef to safely check joining state inside event listeners
+  const isJoiningRef = useRef(isJoining);
+  useEffect(() => {
+    isJoiningRef.current = isJoining;
+  }, [isJoining]);
+
   useEffect(() => {
     invoke<string>("get_local_peer_id").then(setMyPeerId).catch(() => {});
     
@@ -57,13 +63,10 @@ export function useP2P(
       // [CHANGED] Safer join-accepted handler
       listen<number[]>("join-accepted", async (e) => {
         try {
-            // [FIX] Update status immediately so user knows to look for the dialog window
-            setStatus("Accepted. Please select a destination folder...");
-
             // Force guest state immediately
             setIsHost(false);
             
-            // Handle file saving (this might block waiting for User Input)
+            // Handle file saving (this might block or take time)
             await onProjectReceived(e.payload);
             
             setStatus("Joined session! Folder synced.");
@@ -71,7 +74,7 @@ export function useP2P(
             console.error("Error receiving project:", err);
             setStatus("Error syncing project folder.");
         } finally {
-            // Ensure we exit joining state even if save fails or is cancelled
+            // Ensure we exit joining state even if save fails
             setIsJoining(false);
             setIsHost(false); // Double check
         }
@@ -83,6 +86,16 @@ export function useP2P(
       }),
       
       listen<{ path: string, data: number[] }>("p2p-sync", (e) => {
+        // [FIX] Implicit Join Recovery
+        // If we receive sync data from the host, the connection is alive.
+        // If we were stuck in 'Requesting to join...', break out immediately.
+        if (isJoiningRef.current) {
+            console.log("Implicitly joined via sync packet.");
+            setIsJoining(false);
+            setIsHost(false);
+            setStatus("Joined session (Synced).");
+        }
+
         documentRegistry.applyUpdate(e.payload.path, new Uint8Array(e.payload.data));
         if (onFileSync) onFileSync(e.payload.path);
       }),
