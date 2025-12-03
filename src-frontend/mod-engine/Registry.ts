@@ -244,8 +244,10 @@ class Registry {
 
   registerWebviewPanel(id: string, title: string, html: string = "") {
       this.activeWebviews.set(id, { id, title, html, visible: true });
-      // Note: We do NOT auto-hide others here because multiple blocks can be active.
-      // This is a change from single-panel logic.
+      // If we only support one active panel at a time (VSCode tabs style), hide others:
+      this.activeWebviews.forEach((v, k) => {
+          if (k !== id) v.visible = false;
+      });
       this.notify();
       this.emit('webview:created', { id });
   }
@@ -263,10 +265,8 @@ class Registry {
   }
 
   getActiveWebview() {
-      // Deprecated for blocks, used for EditorArea's main webview
+      // Return the first visible one (Single panel mode for this tutorial)
       for (const wv of this.activeWebviews.values()) {
-          // A hack to distinguish main panel from blocks: Main panels probably have generic IDs or are singletons in Phase 5
-          // For now, return the first one. 
           if (wv.visible) return wv;
       }
       return null;
@@ -276,11 +276,6 @@ class Registry {
       this.activeWebviews.delete(id);
       this.notify();
       this.emit('webview:disposed', { id });
-  }
-
-  // [NEW] Helper to trigger resolution in Worker
-  resolveWebviewBlock(viewType: string, webviewId: string) {
-      this.emit('webview:block:resolve', { viewType, webviewId });
   }
 }
 

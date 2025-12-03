@@ -108,10 +108,6 @@ export interface WebviewPanel {
     reveal(): void;
 }
 
-export interface WebviewBlockProvider {
-    onCreate(panel: WebviewPanel): void;
-}
-
 export interface SidebarTab {
   id: string;
   icon: string;
@@ -160,10 +156,6 @@ export interface HostAPI {
   
   editor: {
     registerExtension: (ext: Node | Extension, options?: { priority?: 'high' | 'normal' }) => void;
-    
-    // [NEW] Webview Blocks
-    registerWebviewBlock: (viewType: string, provider: WebviewBlockProvider) => Disposable;
-
     getCommands: () => any; 
     getState: () => EditorState | null;
     getSafeInstance: () => Editor | null;
