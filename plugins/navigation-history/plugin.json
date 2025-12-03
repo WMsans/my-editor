@@ -1,0 +1,11 @@
+{
+  "id": "navigation-history",
+  "name": "Navigation History",
+  "version": "0.1.0",
+  "description": "Back and Forward navigation for files.",
+  "author": "User",
+  "main": "index.tsx",
+  "permissions": [],
+  "executionEnvironment": "worker",
+  "activationEvents": [ "onStartup" ]
+}

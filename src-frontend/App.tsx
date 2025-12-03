@@ -187,6 +187,12 @@ function App() {
         // Clear registry before loading
         registry.init(api);
 
+        registry.registerCommand("file.open", (path: string) => {
+          if (typeof path === 'string') {
+              setCurrentFilePath(path);
+          }
+        });
+
         // B. Discover Plugins
         const pluginsDir = "../plugins"; 
         

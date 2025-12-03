@@ -45,16 +45,18 @@ export const MenuBar: React.FC<MenuBarProps> = ({
 
   // Helper to render dynamic items
   const renderItem = (item: RegisteredTopbarItem) => {
-    const style = { 
+    const style: React.CSSProperties = { 
         marginLeft: '10px', 
         fontSize: '0.8rem',
         padding: '4px 8px',
-        background: '#313244',
+        background: item.disabled ? '#252635' : '#313244',
         border: '1px solid #45475a',
-        color: '#cdd6f4',
+        color: item.disabled ? '#585b70' : '#cdd6f4',
         borderRadius: '4px',
-        cursor: 'pointer',
-        width: item.width || 'auto'
+        cursor: item.disabled ? 'default' : 'pointer',
+        width: item.width || 'auto',
+        opacity: item.disabled ? 0.6 : 1,
+        pointerEvents: item.disabled ? 'none' : 'auto'
     };
 
     if (item.type === 'button') {
@@ -62,7 +64,11 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             <button 
                 key={item.id} 
                 style={style}
-                onClick={(e) => { e.stopPropagation(); item.onClick?.(); }}
+                onClick={(e) => { 
+                    e.stopPropagation(); 
+                    if (!item.disabled) item.onClick?.(); 
+                }}
+                disabled={item.disabled}
                 title={item.tooltip}
             >
                 {item.icon && <span style={{marginRight: item.label ? '5px':0}}>{item.icon}</span>}
@@ -79,9 +85,10 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                     type="text" 
                     placeholder={item.placeholder}
                     defaultValue={item.value}
-                    style={{ ...style, cursor: 'text' }}
+                    style={{ ...style, cursor: 'text', background: '#11111b' }}
                     onChange={(e) => item.onChange?.(e.target.value)}
                     onClick={(e) => e.stopPropagation()}
+                    disabled={item.disabled}
                 />
             </div>
         );
@@ -96,6 +103,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                     defaultValue={item.value}
                     onChange={(e) => item.onChange?.(e.target.value)}
                     onClick={(e) => e.stopPropagation()}
+                    disabled={item.disabled}
                  >
                      {item.options?.map(opt => (
                          <option key={opt} value={opt}>{opt}</option>

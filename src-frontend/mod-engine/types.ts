@@ -64,6 +64,7 @@ export interface TopbarItemOptions {
     width?: string;       // CSS width (e.g. "100px")
     tooltip?: string;
     icon?: string;
+    disabled?: boolean;   // [NEW] Support for disabled state
     onClick?: () => void;
     onChange?: (value: string) => void;
 }
