@@ -1,5 +1,5 @@
 export interface WorkerMessage {
-    type: 'LOAD' | 'EXEC_COMMAND' | 'API_RESPONSE' | 'DEACTIVATE' | 'TREE_VIEW_REQUEST' | 'TOPBAR_ITEM_EVENT' | 'EVENT';
+    type: 'LOAD' | 'EXEC_COMMAND' | 'API_RESPONSE' | 'DEACTIVATE' | 'TREE_VIEW_REQUEST' | 'TOPBAR_ITEM_EVENT' | 'EVENT' | 'WEBVIEW_BLOCK_RESOLVE';
     payload: any;
 }
 
@@ -14,7 +14,9 @@ export interface MainMessage {
     | 'WEBVIEW_REVEAL'
     | 'TREE_VIEW_REVEAL'
     | 'TREE_VIEW_DISPOSE'
-    | 'DISPOSE_TOPBAR_ITEM';
+    | 'DISPOSE_TOPBAR_ITEM'
+    // [NEW] Webview Blocks
+    | 'REGISTER_WEBVIEW_BLOCK_PROVIDER';
     payload: any;
 }
 
@@ -122,4 +124,14 @@ export interface WebviewDisposePayload {
 
 export interface WebviewRevealPayload {
     id: string;
+}
+
+export interface RegisterWebviewBlockProviderPayload {
+    viewType: string;
+    pluginId: string;
+}
+
+export interface WebviewBlockResolvePayload {
+    viewType: string;
+    webviewId: string;
 }

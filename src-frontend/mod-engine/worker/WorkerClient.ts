@@ -1,5 +1,5 @@
 import { HostAPI } from "../types";
-import { MainMessage, WorkerMessage, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, EventPayload } from "./messages";
+import { MainMessage, WorkerMessage, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, EventPayload, WebviewBlockResolvePayload } from "./messages";
 import { registry } from "../Registry";
 
 export class WorkerClient {
@@ -19,6 +19,16 @@ export class WorkerClient {
 
         // [PHASE 4] Bridge Events: Registry -> Worker
         registry.subscribeToAll((event, data) => {
+            // [NEW] Intercept Webview Block Resolve
+            if (event === 'webview:block:resolve') {
+                 const msg: WorkerMessage = {
+                    type: 'WEBVIEW_BLOCK_RESOLVE',
+                    payload: data as WebviewBlockResolvePayload
+                };
+                this.worker.postMessage(msg);
+                return;
+            }
+
             const msg: WorkerMessage = {
                 type: 'EVENT',
                 payload: { event, data }
@@ -158,6 +168,12 @@ export class WorkerClient {
             case 'WEBVIEW_DISPOSE': {
                 const { id } = payload;
                 registry.disposeWebview(id);
+                break;
+            }
+            
+            // [NEW] Webview Block Provider Registration
+            case 'REGISTER_WEBVIEW_BLOCK_PROVIDER': {
+                console.log(`[WorkerClient] Registered block provider: ${payload.viewType}`);
                 break;
             }
         }

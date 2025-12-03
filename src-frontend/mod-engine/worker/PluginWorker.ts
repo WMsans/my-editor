@@ -1,5 +1,5 @@
-import { WorkerMessage, MainMessage, ApiRequestPayload, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, TopbarItemEventPayload, EventPayload } from "./messages";
-import { HostAPI, TreeDataProvider, TreeItem, TopbarItemOptions } from "../types";
+import { WorkerMessage, MainMessage, ApiRequestPayload, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, TopbarItemEventPayload, EventPayload, RegisterWebviewBlockProviderPayload, WebviewBlockResolvePayload } from "./messages";
+import { HostAPI, TreeDataProvider, TreeItem, TopbarItemOptions, WebviewBlockProvider } from "../types";
 import { CreateWebviewPayload, UpdateWebviewHtmlPayload, WebviewPostMessagePayload, WebviewDisposePayload } from "./messages";
 
 // --- State ---
@@ -10,6 +10,8 @@ const activeWorkerPlugins = new Map<string, any>();
 // [PHASE 2] UI Data Providers
 const treeDataProviders = new Map<string, TreeDataProvider<any>>();
 const topbarEventHandlers = new Map<string, { onChange?: Function, onClick?: Function }>();
+// [NEW] Webview Block Providers
+const webviewBlockProviders = new Map<string, WebviewBlockProvider>();
 
 // [PHASE 4] Event Listeners
 const eventListeners = new Map<string, ((data: any) => void)[]>();
@@ -23,6 +25,51 @@ const postToMain = (msg: MainMessage) => {
 
 // --- Helper: Create UUID ---
 const uuid = () => Math.random().toString(36).substring(2, 15);
+
+// --- Helper: Create Webview Proxy Object ---
+const createWebviewProxy = (id: string, viewType: string, title: string) => {
+    // 2. Setup Local Object
+    activeWebviews.set(id, {});
+
+    const webviewObj = {
+        _html: "",
+        get html() { return this._html; },
+        set html(val: string) {
+            this._html = val;
+            postToMain({ 
+                type: 'WEBVIEW_UPDATE_HTML', 
+                payload: { id, html: val } as UpdateWebviewHtmlPayload 
+            });
+        },
+        postMessage: async (message: any) => {
+                postToMain({
+                    type: 'WEBVIEW_POST_MESSAGE',
+                    payload: { id, message } as WebviewPostMessagePayload
+                });
+                return true;
+        },
+        onDidReceiveMessage: (listener: (msg: any) => void) => {
+            const wv = activeWebviews.get(id);
+            if (wv) wv.onMessage = listener;
+            return { dispose: () => { if (wv) wv.onMessage = undefined; } };
+        }
+    };
+
+    return {
+        id,
+        viewType,
+        title,
+        webview: webviewObj,
+        visible: true,
+        reveal: () => {
+            postToMain({ type: 'WEBVIEW_REVEAL', payload: { id } });
+        },
+        dispose: () => {
+            activeWebviews.delete(id);
+            postToMain({ type: 'WEBVIEW_DISPOSE', payload: { id } as WebviewDisposePayload });
+        }
+    };
+};
 
 // --- API Proxy Factory ---
 const createWorkerAPI = (pluginId: string): HostAPI => {
@@ -78,48 +125,7 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
                 const payload: CreateWebviewPayload = { id, viewType, title, options };
                 postToMain({ type: 'WEBVIEW_CREATE', payload });
 
-                // 2. Setup Local Object
-                activeWebviews.set(id, {});
-
-                const webviewObj = {
-                    _html: "",
-                    get html() { return this._html; },
-                    set html(val: string) {
-                        this._html = val;
-                        postToMain({ 
-                            type: 'WEBVIEW_UPDATE_HTML', 
-                            payload: { id, html: val } as UpdateWebviewHtmlPayload 
-                        });
-                    },
-                    postMessage: async (message: any) => {
-                         postToMain({
-                             type: 'WEBVIEW_POST_MESSAGE',
-                             payload: { id, message } as WebviewPostMessagePayload
-                         });
-                         return true;
-                    },
-                    onDidReceiveMessage: (listener: (msg: any) => void) => {
-                        const wv = activeWebviews.get(id);
-                        if (wv) wv.onMessage = listener;
-                        return { dispose: () => { if (wv) wv.onMessage = undefined; } };
-                    }
-                };
-
-                return {
-                    id,
-                    viewType,
-                    title,
-                    webview: webviewObj,
-                    visible: true,
-                    reveal: () => {
-                        // Request focus on the main thread
-                        postToMain({ type: 'WEBVIEW_REVEAL', payload: { id } });
-                    },
-                    dispose: () => {
-                        activeWebviews.delete(id);
-                        postToMain({ type: 'WEBVIEW_DISPOSE', payload: { id } as WebviewDisposePayload });
-                    }
-                };
+                return createWebviewProxy(id, viewType, title);
             },
             createTreeView: (viewId, options) => {
                 console.log(`[Worker] Registering TreeView: ${viewId}`);
@@ -207,7 +213,16 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
         },
         
         editor: {
-            // Stubbed for Types; Workers can't access Editor directly yet
+            // [NEW] Webview Blocks
+            registerWebviewBlock: (viewType, provider) => {
+                webviewBlockProviders.set(viewType, provider);
+                postToMain({ type: 'REGISTER_WEBVIEW_BLOCK_PROVIDER', payload: { viewType, pluginId } });
+                
+                return {
+                    dispose: () => { webviewBlockProviders.delete(viewType); }
+                };
+            },
+
             registerExtension: () => { console.warn("Worker plugins cannot directly register Tiptap extensions. Use static contributions in manifest."); },
             getCommands: () => { console.warn("Direct command access unavailable. Use commands.executeCommand()."); return {}; },
             getState: () => { console.warn("Direct EditorState access unavailable in worker."); return null; },
@@ -336,6 +351,23 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                  if (eventType === 'onChange' && handlers.onChange) handlers.onChange(value);
              }
              break;
+        }
+
+        // [NEW] Handle Webview Block Resolution
+        case 'WEBVIEW_BLOCK_RESOLVE': {
+            const { viewType, webviewId } = payload as WebviewBlockResolvePayload;
+            const provider = webviewBlockProviders.get(viewType);
+            
+            if (provider) {
+                console.log(`[Worker] Resolving Webview Block '${viewType}' -> ${webviewId}`);
+                // Create a proxy webview object for this ID
+                const proxy = createWebviewProxy(webviewId, viewType, `Block: ${viewType}`);
+                // Call the plugin
+                provider.onCreate(proxy);
+            } else {
+                console.warn(`[Worker] No provider found for Webview Block '${viewType}'`);
+            }
+            break;
         }
 
         // [PHASE 4] Handle Application Events (Merged Logic)

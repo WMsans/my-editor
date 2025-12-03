@@ -6,6 +6,7 @@ import BubbleMenuExtension from "@tiptap/extension-bubble-menu";
 import * as Y from "yjs";
 
 import { registry } from "../mod-engine/Registry";
+import { WebviewBlockNode } from "../components/WebviewBlock";
 
 export function useCollaborativeEditor(doc: Y.Doc | null) {
   const editor = useEditor({
@@ -20,6 +21,9 @@ export function useCollaborativeEditor(doc: Y.Doc | null) {
       Collaboration.configure({ document: doc || new Y.Doc() }),
       Markdown,
       BubbleMenuExtension,
+      
+      // [NEW] Core Extension for Webview Blocks
+      WebviewBlockNode,
       
       // Standard plugins
       ...registry.getExtensions() 
