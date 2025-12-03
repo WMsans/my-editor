@@ -1,5 +1,6 @@
 import { WorkerMessage, MainMessage, ApiRequestPayload, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, TopbarItemEventPayload, EventPayload } from "./messages";
 import { HostAPI, TreeDataProvider, TreeItem, TopbarItemOptions } from "../types";
+import { CreateWebviewPayload, UpdateWebviewHtmlPayload, WebviewPostMessagePayload, WebviewDisposePayload } from "./messages";
 
 // --- State ---
 const commandHandlers = new Map<string, Function>();
@@ -12,6 +13,8 @@ const topbarEventHandlers = new Map<string, { onChange?: Function, onClick?: Fun
 
 // [PHASE 4] Event Listeners
 const eventListeners = new Map<string, ((data: any) => void)[]>();
+
+const activeWebviews = new Map<string, { onMessage?: (msg: any) => void }>();
 
 // --- Helper: Send to Main ---
 const postToMain = (msg: MainMessage) => {
@@ -66,6 +69,58 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
 
         // [PHASE 2] Window API (Data Driven)
         window: {
+            // [PHASE 5] Webview API
+            createWebviewPanel: (viewType, title, options) => {
+                const id = uuid();
+                console.log(`[Worker] Creating Webview: ${id}`);
+                
+                // 1. Notify Main Thread
+                const payload: CreateWebviewPayload = { id, viewType, title, options };
+                postToMain({ type: 'WEBVIEW_CREATE', payload });
+
+                // 2. Setup Local Object
+                activeWebviews.set(id, {});
+
+                const webviewObj = {
+                    _html: "",
+                    get html() { return this._html; },
+                    set html(val: string) {
+                        this._html = val;
+                        postToMain({ 
+                            type: 'WEBVIEW_UPDATE_HTML', 
+                            payload: { id, html: val } as UpdateWebviewHtmlPayload 
+                        });
+                    },
+                    postMessage: async (message: any) => {
+                         postToMain({
+                             type: 'WEBVIEW_POST_MESSAGE',
+                             payload: { id, message } as WebviewPostMessagePayload
+                         });
+                         return true;
+                    },
+                    onDidReceiveMessage: (listener: (msg: any) => void) => {
+                        const wv = activeWebviews.get(id);
+                        if (wv) wv.onMessage = listener;
+                        return { dispose: () => { if (wv) wv.onMessage = undefined; } };
+                    }
+                };
+
+                return {
+                    id,
+                    viewType,
+                    title,
+                    webview: webviewObj,
+                    visible: true,
+                    reveal: () => {
+                        // Request focus on the main thread
+                        postToMain({ type: 'WEBVIEW_REVEAL', payload: { id } });
+                    },
+                    dispose: () => {
+                        activeWebviews.delete(id);
+                        postToMain({ type: 'WEBVIEW_DISPOSE', payload: { id } as WebviewDisposePayload });
+                    }
+                };
+            },
             createTreeView: (viewId, options) => {
                 console.log(`[Worker] Registering TreeView: ${viewId}`);
                 treeDataProviders.set(viewId, options.treeDataProvider);
@@ -77,9 +132,16 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
                 });
 
                 return {
-                    dispose: () => treeDataProviders.delete(viewId),
+                    dispose: () => {
+                        treeDataProviders.delete(viewId);
+                        postToMain({ type: 'TREE_VIEW_DISPOSE', payload: { viewId } });
+                    },
                     reveal: async (element, options) => {
-                        // Not implemented in Phase 2
+                        // Send request to reveal specific item in UI
+                        postToMain({ 
+                            type: 'TREE_VIEW_REVEAL', 
+                            payload: { viewId, element, options } 
+                        });
                     }
                 };
             },
@@ -116,12 +178,14 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
                     },
                     dispose: () => {
                         topbarEventHandlers.delete(options.id);
-                        // Implement dispose message if needed
+                        postToMain({ 
+                            type: 'DISPOSE_TOPBAR_ITEM', 
+                            payload: { id: options.id } 
+                        });
                     }
                 };
             },
             showInformationMessage: (message, ...items) => {
-                // @ts-ignore
                 return callMain('ui', 'showNotification', message) as Promise<string | undefined>; 
             }
         },
@@ -144,9 +208,9 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
         
         editor: {
             // Stubbed for Types; Workers can't access Editor directly yet
-            registerExtension: () => {},
-            getCommands: () => ({}),
-            getState: () => null,
+            registerExtension: () => { console.warn("Worker plugins cannot directly register Tiptap extensions. Use static contributions in manifest."); },
+            getCommands: () => { console.warn("Direct command access unavailable. Use commands.executeCommand()."); return {}; },
+            getState: () => { console.warn("Direct EditorState access unavailable in worker."); return null; },
             getSafeInstance: () => null,
         },
 
@@ -158,7 +222,7 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
                 createDirectory: (path: string) => callMain('data.fs', 'createDirectory', path) as Promise<void>
             },
             getDoc: () => { throw new Error("Direct Y.Doc access not available in Worker yet."); },
-            getMap: (name) => { throw new Error("Direct Y.Map access not available in Worker yet."); }
+            getMap: (name) => { throw new Error("Direct Y.Map (" + name + ") access not available in Worker yet."); }
         },
         plugins: {
              getAll: () => callMain('plugins', 'getAll') as Promise<any>,
@@ -274,9 +338,21 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
              break;
         }
 
-        // [PHASE 4] Handle Application Events
+        // [PHASE 4] Handle Application Events (Merged Logic)
         case 'EVENT': {
             const { event, data } = payload as EventPayload;
+            
+            // 1. Handle Webview-specific messages intercepted by Event Bus
+            if (event.startsWith('webview:received-message:')) {
+                const webviewId = event.split(':')[2];
+                const wv = activeWebviews.get(webviewId);
+                if (wv && wv.onMessage) {
+                    wv.onMessage(data);
+                }
+                return; // Consumed
+            }
+
+            // 2. Handle standard events subscribed via api.events.on()
             const handlers = eventListeners.get(event);
             handlers?.forEach(h => {
                 try { h(data); } catch(e) { console.error(`Error in worker event listener for ${event}:`, e); }

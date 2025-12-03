@@ -135,6 +135,31 @@ export class WorkerClient {
                 registry.emit(event, data);
                 break;
             }
+
+            case 'WEBVIEW_CREATE': {
+                const { id, title, options } = payload;
+                registry.registerWebviewPanel(id, title);
+                break;
+            }
+
+            case 'WEBVIEW_UPDATE_HTML': {
+                const { id, html } = payload;
+                registry.updateWebviewHtml(id, html);
+                break;
+            }
+
+            case 'WEBVIEW_POST_MESSAGE': {
+                const { id, message } = payload;
+                // Emit to Event Bus, which the WebviewContainer listens to
+                registry.emit(`webview:post-message:${id}`, { targetWebviewId: id, message });
+                break;
+            }
+
+            case 'WEBVIEW_DISPOSE': {
+                const { id } = payload;
+                registry.disposeWebview(id);
+                break;
+            }
         }
     }
 

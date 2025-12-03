@@ -1,7 +1,9 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { EditorContent, Editor } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import { SlashMenu } from "./SlashMenu";
+import { registry } from "../mod-engine/Registry";
+import { WebviewContainer } from "./WebviewContainer";
 
 interface EditorAreaProps {
   editor: Editor | null;
@@ -16,6 +18,25 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
   isPushing, 
   isSyncing 
 }) => {
+  // [PHASE 5] Webview State
+  const [activeWebview, setActiveWebview] = useState<{id: string, html: string, title: string} | null>(null);
+
+  useEffect(() => {
+    // Check initial state
+    const current = registry.getActiveWebview();
+    if (current) setActiveWebview({ ...current });
+
+    // Subscribe to registry changes
+    const unsubscribe = registry.subscribe(() => {
+        const wv = registry.getActiveWebview();
+        if (wv) {
+            setActiveWebview({ ...wv });
+        } else {
+            setActiveWebview(null);
+        }
+    });
+    return unsubscribe;
+  }, []);
   return (
     <main className="editor-container">
       {(isSyncing || isPushing) && (
@@ -28,7 +49,19 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
           </div>
         </div>
       )}
-
+      {activeWebview ? (
+          <div className="webview-layer" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+              <div className="webview-header" style={{ padding: '8px 16px', background: '#181825', borderBottom: '1px solid #313244', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{activeWebview.title.toUpperCase()}</span>
+                  <button onClick={() => registry.disposeWebview(activeWebview.id)} style={{background: 'none', border:'none', color:'#f38ba8', cursor:'pointer'}}>Close</button>
+              </div>
+              <WebviewContainer 
+                  id={activeWebview.id} 
+                  html={activeWebview.html} 
+                  visible={true} 
+              />
+          </div>
+      ) : (
       <div className="editor-scroll-area">
         {editor && <SlashMenu editor={editor} />}
 
@@ -56,7 +89,7 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
         )}
         <EditorContent editor={editor} />
       </div>
-      
+      )}
       {/* Add specific CSS for the loading overlay here or in App.css */}
       <style>{`
         .loading-overlay {

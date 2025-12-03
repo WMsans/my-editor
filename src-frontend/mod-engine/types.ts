@@ -81,6 +81,33 @@ export interface RegisteredTopbarItem extends TopbarItemOptions {
 
 // --- Contribution Types ---
 
+export interface WebviewOptions {
+    enableScripts?: boolean;
+    retainContextWhenHidden?: boolean;
+}
+
+export interface WebviewPanelOptions {
+    viewType: string;
+    title: string;
+    showOptions?: { preserveFocus?: boolean };
+}
+
+export interface Webview {
+    html: string;
+    postMessage(message: any): Promise<boolean>;
+    onDidReceiveMessage(listener: (message: any) => void): Disposable;
+}
+
+export interface WebviewPanel {
+    id: string; // Internal UUID
+    viewType: string;
+    title: string;
+    webview: Webview;
+    visible: boolean;
+    dispose(): void;
+    reveal(): void;
+}
+
 export interface SidebarTab {
   id: string;
   icon: string;
@@ -119,6 +146,9 @@ export interface HostAPI {
 
   // [PHASE 2] Window / UI API (Data Driven)
   window: {
+      // [PHASE 5] Webviews
+      createWebviewPanel: (viewType: string, title: string, options?: WebviewOptions) => WebviewPanel;
+
       createTreeView: <T>(viewId: string, options: TreeViewOptions<T>) => TreeView<T>;
       createTopbarItem: (options: TopbarItemOptions) => TopbarItemControl;
       showInformationMessage: (message: string, ...items: string[]) => Promise<string | undefined>;

@@ -1,5 +1,4 @@
-import { Mod, SidebarTab, HostAPI, PluginManifest, ViewContainerContribution, ViewContribution, RegisteredTopbarItem, Disposable } from "./types";
-
+import { Mod, SidebarTab, HostAPI, PluginManifest, ViewContainerContribution, ViewContribution, RegisteredTopbarItem, Disposable, WebviewPanel } from "./types";
 interface SlashCommandDef {
     id: string; 
     command: string; 
@@ -17,7 +16,6 @@ interface RegisteredView extends ViewContribution {
 }
 
 class Registry {
-  // [CHANGED] Separate high priority extensions
   private highPriorityExtensions: any[] = [];
   private dynamicExtensions: any[] = [];
   
@@ -40,6 +38,8 @@ class Registry {
   private eventListeners = new Map<string, ((data: any) => void)[]>();
   private globalEventListeners: ((event: string, data: any) => void)[] = [];
 
+  private activeWebviews: Map<string, { id: string, title: string, html: string, visible: boolean }> = new Map();
+
   private api: HostAPI | null = null;
 
   init(api: HostAPI) {
@@ -59,6 +59,9 @@ class Registry {
     // Clear events
     this.eventListeners.clear();
     this.globalEventListeners = [];
+
+    // Clear Webview
+    this.activeWebviews.clear();
   }
 
   // --- Registry Subscription ---
@@ -238,6 +241,42 @@ class Registry {
   }
 
   getTopbarItems() { return this.topbarItems; }
+
+  registerWebviewPanel(id: string, title: string, html: string = "") {
+      this.activeWebviews.set(id, { id, title, html, visible: true });
+      // If we only support one active panel at a time (VSCode tabs style), hide others:
+      this.activeWebviews.forEach((v, k) => {
+          if (k !== id) v.visible = false;
+      });
+      this.notify();
+      this.emit('webview:created', { id });
+  }
+
+  updateWebviewHtml(id: string, html: string) {
+      const wv = this.activeWebviews.get(id);
+      if (wv) {
+          wv.html = html;
+          this.notify(); // Triggers React re-render
+      }
+  }
+
+  getWebview(id: string) {
+      return this.activeWebviews.get(id);
+  }
+
+  getActiveWebview() {
+      // Return the first visible one (Single panel mode for this tutorial)
+      for (const wv of this.activeWebviews.values()) {
+          if (wv.visible) return wv;
+      }
+      return null;
+  }
+
+  disposeWebview(id: string) {
+      this.activeWebviews.delete(id);
+      this.notify();
+      this.emit('webview:disposed', { id });
+  }
 }
 
 export const registry = new Registry();
