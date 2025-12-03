@@ -1,5 +1,5 @@
 import { HostAPI } from "../types";
-import { MainMessage, WorkerMessage, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload } from "./messages";
+import { MainMessage, WorkerMessage, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, EventPayload } from "./messages";
 import { registry } from "../Registry";
 
 export class WorkerClient {
@@ -16,6 +16,15 @@ export class WorkerClient {
         
         this.worker.onmessage = this.handleMessage.bind(this);
         this.worker.onerror = (e) => console.error("Plugin Worker Error:", e);
+
+        // [PHASE 4] Bridge Events: Registry -> Worker
+        registry.subscribeToAll((event, data) => {
+            const msg: WorkerMessage = {
+                type: 'EVENT',
+                payload: { event, data }
+            };
+            this.worker.postMessage(msg);
+        });
     }
 
     loadPlugin(pluginId: string, code: string, manifest: any) {
@@ -115,6 +124,15 @@ export class WorkerClient {
             case 'UPDATE_TOPBAR_ITEM': {
                 const { id, options } = payload as UpdateTopbarItemPayload;
                 registry.updateTopbarItem(id, options);
+                break;
+            }
+
+            // [PHASE 4] Bridge Events: Worker -> Registry
+            case 'EMIT_EVENT': {
+                const { event, data } = payload as EventPayload;
+                // We emit to registry, which will trigger our subscription above
+                // and echo back to worker. The worker handles this echo gracefully.
+                registry.emit(event, data);
                 break;
             }
         }

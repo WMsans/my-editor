@@ -105,11 +105,20 @@ export interface ViewContribution {
     type?: string; 
 }
 
+export interface Disposable {
+    dispose(): void;
+}
+
 export interface HostAPI {
+  // [PHASE 4] Event Bus
+  events: {
+      emit: (event: string, data?: any) => void;
+      on: (event: string, handler: (data: any) => void) => Disposable;
+  };
+
   // [PHASE 2] Window / UI API (Data Driven)
   window: {
       createTreeView: <T>(viewId: string, options: TreeViewOptions<T>) => TreeView<T>;
-      // [NEW] Allow creating items on the top bar
       createTopbarItem: (options: TopbarItemOptions) => TopbarItemControl;
       showInformationMessage: (message: string, ...items: string[]) => Promise<string | undefined>;
   };

@@ -1,4 +1,4 @@
-import { Mod, SidebarTab, HostAPI, PluginManifest, ViewContainerContribution, ViewContribution, RegisteredTopbarItem } from "./types";
+import { Mod, SidebarTab, HostAPI, PluginManifest, ViewContainerContribution, ViewContribution, RegisteredTopbarItem, Disposable } from "./types";
 
 interface SlashCommandDef {
     id: string; 
@@ -24,17 +24,21 @@ class Registry {
   // UI Elements
   private sidebarTabs: SidebarTab[] = [];
   private slashCommands: SlashCommandDef[] = [];
-  private topbarItems: RegisteredTopbarItem[] = []; // [NEW]
+  private topbarItems: RegisteredTopbarItem[] = [];
   
   // [PHASE 1] Static Contributions
   private viewContainers: RegisteredViewContainer[] = [];
-  private views: Map<string, RegisteredView[]> = new Map(); // containerId -> views[]
+  private views: Map<string, RegisteredView[]> = new Map();
 
   // Command Handlers
   private commandHandlers = new Map<string, (args?: any) => void>();
   
-  // Event Emitters
+  // Registry Change Listeners
   private listeners: (() => void)[] = [];
+
+  // [PHASE 4] Application Event Bus
+  private eventListeners = new Map<string, ((data: any) => void)[]>();
+  private globalEventListeners: ((event: string, data: any) => void)[] = [];
 
   private api: HostAPI | null = null;
 
@@ -51,9 +55,13 @@ class Registry {
     this.viewContainers = [];
     this.views.clear();
     this.notify();
+
+    // Clear events
+    this.eventListeners.clear();
+    this.globalEventListeners = [];
   }
 
-  // --- Subscription ---
+  // --- Registry Subscription ---
   subscribe(listener: () => void) {
       this.listeners.push(listener);
       return () => {
@@ -63,6 +71,57 @@ class Registry {
 
   private notify() {
       this.listeners.forEach(l => l());
+  }
+
+  // --- [PHASE 4] Event Bus Implementation ---
+  
+  /**
+   * Listen to a specific event
+   */
+  on(event: string, handler: (data: any) => void): Disposable {
+      if (!this.eventListeners.has(event)) {
+          this.eventListeners.set(event, []);
+      }
+      this.eventListeners.get(event)!.push(handler);
+      
+      return {
+          dispose: () => {
+              const handlers = this.eventListeners.get(event);
+              if (handlers) {
+                  this.eventListeners.set(event, handlers.filter(h => h !== handler));
+              }
+          }
+      };
+  }
+
+  /**
+   * Listen to ALL events (used by WorkerBridge)
+   */
+  subscribeToAll(handler: (event: string, data: any) => void): Disposable {
+      this.globalEventListeners.push(handler);
+      return {
+          dispose: () => {
+              this.globalEventListeners = this.globalEventListeners.filter(h => h !== handler);
+          }
+      };
+  }
+
+  /**
+   * Emit an event to all listeners
+   */
+  emit(event: string, data?: any) {
+      // 1. Notify specific listeners
+      const handlers = this.eventListeners.get(event);
+      if (handlers) {
+          handlers.forEach(h => {
+              try { h(data); } catch(e) { console.error(`Error in event handler for ${event}:`, e); }
+          });
+      }
+
+      // 2. Notify global listeners (e.g., Worker Bridge)
+      this.globalEventListeners.forEach(h => {
+          try { h(event, data); } catch(e) { console.error(`Error in global event handler for ${event}:`, e); }
+      });
   }
 
   // --- [PHASE 1] Static Registration ---
@@ -154,7 +213,7 @@ class Registry {
     }
   }
 
-  // --- [NEW] Topbar Items ---
+  // --- Topbar Items ---
   registerTopbarItem(item: RegisteredTopbarItem) {
       const idx = this.topbarItems.findIndex(i => i.id === item.id);
       if (idx !== -1) {

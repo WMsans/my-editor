@@ -27,7 +27,13 @@ export const createHostAPI = (
   };
 
   return {
-    // [PHASE 2] Window API Implementation for Main Thread
+    // [PHASE 4] Event Bus
+    events: {
+        emit: (event, data) => registry.emit(event, data),
+        on: (event, handler) => registry.on(event, handler)
+    },
+
+    // [PHASE 2] Window API Implementation
     window: {
       createTreeView: <T>(viewId: string, options: TreeViewOptions<T>): TreeView<T> => {
         console.log(`[Main] TreeView registered: ${viewId}`);

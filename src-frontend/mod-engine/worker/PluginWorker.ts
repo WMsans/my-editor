@@ -1,4 +1,4 @@
-import { WorkerMessage, MainMessage, ApiRequestPayload, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, TopbarItemEventPayload } from "./messages";
+import { WorkerMessage, MainMessage, ApiRequestPayload, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, TopbarItemEventPayload, EventPayload } from "./messages";
 import { HostAPI, TreeDataProvider, TreeItem, TopbarItemOptions } from "../types";
 
 // --- State ---
@@ -8,7 +8,10 @@ const activeWorkerPlugins = new Map<string, any>();
 
 // [PHASE 2] UI Data Providers
 const treeDataProviders = new Map<string, TreeDataProvider<any>>();
-const topbarEventHandlers = new Map<string, { onChange?: Function, onClick?: Function }>(); // [NEW]
+const topbarEventHandlers = new Map<string, { onChange?: Function, onClick?: Function }>();
+
+// [PHASE 4] Event Listeners
+const eventListeners = new Map<string, ((data: any) => void)[]>();
 
 // --- Helper: Send to Main ---
 const postToMain = (msg: MainMessage) => {
@@ -39,6 +42,28 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
     };
 
     return {
+        // [PHASE 4] Event Bus
+        events: {
+            emit: (event, data) => {
+                postToMain({ type: 'EMIT_EVENT', payload: { event, data } });
+            },
+            on: (event, handler) => {
+                if (!eventListeners.has(event)) {
+                    eventListeners.set(event, []);
+                }
+                eventListeners.get(event)!.push(handler);
+                
+                return {
+                    dispose: () => {
+                        const handlers = eventListeners.get(event);
+                        if (handlers) {
+                            eventListeners.set(event, handlers.filter(h => h !== handler));
+                        }
+                    }
+                };
+            }
+        },
+
         // [PHASE 2] Window API (Data Driven)
         window: {
             createTreeView: (viewId, options) => {
@@ -61,7 +86,6 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
             // [NEW] Topbar API
             createTopbarItem: (options: TopbarItemOptions) => {
                 const handlers: any = {};
-                // The worker-side user might pass onClick/onChange in options, which we strip before sending
                 const { ...safeOptions } = options as any;
                 
                 // Store handlers locally
@@ -239,7 +263,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             break;
         }
 
-        // [NEW] Handle UI Events for Topbar
+        // Handle UI Events for Topbar
         case 'TOPBAR_ITEM_EVENT': {
              const { id, type: eventType, value } = payload as TopbarItemEventPayload;
              const handlers = topbarEventHandlers.get(id);
@@ -248,6 +272,16 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                  if (eventType === 'onChange' && handlers.onChange) handlers.onChange(value);
              }
              break;
+        }
+
+        // [PHASE 4] Handle Application Events
+        case 'EVENT': {
+            const { event, data } = payload as EventPayload;
+            const handlers = eventListeners.get(event);
+            handlers?.forEach(h => {
+                try { h(data); } catch(e) { console.error(`Error in worker event listener for ${event}:`, e); }
+            });
+            break;
         }
     }
 };

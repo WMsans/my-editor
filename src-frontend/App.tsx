@@ -62,6 +62,13 @@ function App() {
     getRelativePath
   } = useProject(setWarningMsg);
 
+  // --- EVENT: Emit file:open ---
+  useEffect(() => {
+    if (currentFilePath) {
+      registry.emit('file:open', { path: currentFilePath });
+    }
+  }, [currentFilePath]);
+
   // --- P2P Callbacks ---
   const handleHostDisconnect = useCallback((hostId: string) => {
       deadHostIdRef.current = hostId;
@@ -218,6 +225,7 @@ function App() {
   const onNewFileClick = () => {
     handleNewFile();
     editor?.commands.clearContent();
+    registry.emit('file:new');
   };
 
   const handleSave = async () => {
@@ -234,6 +242,7 @@ function App() {
             const relPath = getRelativePath(currentFilePath);
             if (relPath) {
                 await documentRegistry.manualSave(relPath);
+                registry.emit('file:save', { path: currentFilePath });
             }
         } else {
             const name = prompt("Enter file name (e.g., page.md):");
@@ -247,6 +256,7 @@ function App() {
             });
             setFileSystemRefresh(prev => prev + 1);
             setCurrentFilePath(newPath);
+            registry.emit('file:save', { path: newPath });
         }
     } catch (e: any) {
         setWarningMsg(`Failed to save file: ${e.toString()}`);

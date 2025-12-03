@@ -1,10 +1,10 @@
 export interface WorkerMessage {
-    type: 'LOAD' | 'EXEC_COMMAND' | 'API_RESPONSE' | 'DEACTIVATE' | 'TREE_VIEW_REQUEST' | 'TOPBAR_ITEM_EVENT'; 
+    type: 'LOAD' | 'EXEC_COMMAND' | 'API_RESPONSE' | 'DEACTIVATE' | 'TREE_VIEW_REQUEST' | 'TOPBAR_ITEM_EVENT' | 'EVENT'; 
     payload: any;
 }
 
 export interface MainMessage {
-    type: 'API_REQUEST' | 'LOG' | 'REGISTER_COMMAND_PROXY' | 'TREE_VIEW_REGISTER' | 'TREE_VIEW_RESPONSE' | 'REGISTER_TOPBAR_ITEM' | 'UPDATE_TOPBAR_ITEM';
+    type: 'API_REQUEST' | 'LOG' | 'REGISTER_COMMAND_PROXY' | 'TREE_VIEW_REGISTER' | 'TREE_VIEW_RESPONSE' | 'REGISTER_TOPBAR_ITEM' | 'UPDATE_TOPBAR_ITEM' | 'EMIT_EVENT';
     payload: any;
 }
 
@@ -65,4 +65,10 @@ export interface TopbarItemEventPayload {
     id: string;
     type: 'onClick' | 'onChange';
     value?: string;
+}
+
+// [PHASE 4] Event Bus Payloads
+export interface EventPayload {
+    event: string;
+    data: any;
 }
