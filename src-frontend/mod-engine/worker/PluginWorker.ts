@@ -1,5 +1,5 @@
-import { WorkerMessage, MainMessage, ApiRequestPayload, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload } from "./messages";
-import { HostAPI, TreeDataProvider, TreeItem } from "../types";
+import { WorkerMessage, MainMessage, ApiRequestPayload, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, TopbarItemEventPayload } from "./messages";
+import { HostAPI, TreeDataProvider, TreeItem, TopbarItemOptions } from "../types";
 
 // --- State ---
 const commandHandlers = new Map<string, Function>();
@@ -8,6 +8,7 @@ const activeWorkerPlugins = new Map<string, any>();
 
 // [PHASE 2] UI Data Providers
 const treeDataProviders = new Map<string, TreeDataProvider<any>>();
+const topbarEventHandlers = new Map<string, { onChange?: Function, onClick?: Function }>(); // [NEW]
 
 // --- Helper: Send to Main ---
 const postToMain = (msg: MainMessage) => {
@@ -54,6 +55,44 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
                     dispose: () => treeDataProviders.delete(viewId),
                     reveal: async (element, options) => {
                         // Not implemented in Phase 2
+                    }
+                };
+            },
+            // [NEW] Topbar API
+            createTopbarItem: (options: TopbarItemOptions) => {
+                const handlers: any = {};
+                // The worker-side user might pass onClick/onChange in options, which we strip before sending
+                const { ...safeOptions } = options as any;
+                
+                // Store handlers locally
+                if (safeOptions.onClick) {
+                    handlers.onClick = safeOptions.onClick;
+                    delete safeOptions.onClick;
+                }
+                if (safeOptions.onChange) {
+                    handlers.onChange = safeOptions.onChange;
+                    delete safeOptions.onChange;
+                }
+                topbarEventHandlers.set(options.id, handlers);
+
+                // Send registration to main
+                const payload: RegisterTopbarItemPayload = {
+                    id: options.id,
+                    pluginId,
+                    options: safeOptions
+                };
+                postToMain({ type: 'REGISTER_TOPBAR_ITEM', payload });
+
+                return {
+                    update: (opts) => {
+                        postToMain({ 
+                            type: 'UPDATE_TOPBAR_ITEM', 
+                            payload: { id: options.id, options: opts } 
+                        });
+                    },
+                    dispose: () => {
+                        topbarEventHandlers.delete(options.id);
+                        // Implement dispose message if needed
                     }
                 };
             },
@@ -119,8 +158,6 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                 const module = { exports };
                 
                 // [PHASE 2] Remove React/DOM injection
-                // We intentionally do NOT pass React, ReactDOM, or Tiptap.
-                // Plugins must use the API to define UI.
                 const syntheticRequire = (mod: string) => {
                     throw new Error(`Module '${mod}' is not available in Worker environment. Use the Host API.`);
                 };
@@ -178,7 +215,6 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
             break;
         }
 
-        // [PHASE 2] Handle Tree View Data Requests
         case 'TREE_VIEW_REQUEST': {
             const { requestId, viewId, action, element } = payload as TreeViewRequestPayload;
             const provider = treeDataProviders.get(viewId);
@@ -201,6 +237,17 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
             postToMain({ type: 'TREE_VIEW_RESPONSE', payload: response });
             break;
+        }
+
+        // [NEW] Handle UI Events for Topbar
+        case 'TOPBAR_ITEM_EVENT': {
+             const { id, type: eventType, value } = payload as TopbarItemEventPayload;
+             const handlers = topbarEventHandlers.get(id);
+             if (handlers) {
+                 if (eventType === 'onClick' && handlers.onClick) handlers.onClick();
+                 if (eventType === 'onChange' && handlers.onChange) handlers.onChange(value);
+             }
+             break;
         }
     }
 };

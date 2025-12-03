@@ -1,10 +1,10 @@
 export interface WorkerMessage {
-    type: 'LOAD' | 'EXEC_COMMAND' | 'API_RESPONSE' | 'DEACTIVATE' | 'TREE_VIEW_REQUEST'; 
+    type: 'LOAD' | 'EXEC_COMMAND' | 'API_RESPONSE' | 'DEACTIVATE' | 'TREE_VIEW_REQUEST' | 'TOPBAR_ITEM_EVENT'; 
     payload: any;
 }
 
 export interface MainMessage {
-    type: 'API_REQUEST' | 'LOG' | 'REGISTER_COMMAND_PROXY' | 'TREE_VIEW_REGISTER' | 'TREE_VIEW_RESPONSE';
+    type: 'API_REQUEST' | 'LOG' | 'REGISTER_COMMAND_PROXY' | 'TREE_VIEW_REGISTER' | 'TREE_VIEW_RESPONSE' | 'REGISTER_TOPBAR_ITEM' | 'UPDATE_TOPBAR_ITEM';
     payload: any;
 }
 
@@ -47,4 +47,22 @@ export interface TreeViewResponsePayload {
     requestId: string;
     data?: any; // TreeItem or T[]
     error?: string;
+}
+
+// [NEW] Topbar Payloads
+export interface RegisterTopbarItemPayload {
+    id: string; // The item's internal ID
+    pluginId: string;
+    options: any; // TopbarItemOptions
+}
+
+export interface UpdateTopbarItemPayload {
+    id: string;
+    options: any; // Partial<TopbarItemOptions>
+}
+
+export interface TopbarItemEventPayload {
+    id: string;
+    type: 'onClick' | 'onChange';
+    value?: string;
 }

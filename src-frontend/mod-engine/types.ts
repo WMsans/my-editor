@@ -50,6 +50,34 @@ export interface TreeView<T> {
     reveal(element: T, options?: { select?: boolean; focus?: boolean; expand?: boolean | number }): Promise<void>;
 }
 
+// --- Top Bar / Toolbar Types ---
+
+export type TopbarItemType = 'button' | 'text' | 'dropdown';
+
+export interface TopbarItemOptions {
+    id: string; 
+    type: TopbarItemType;
+    label?: string;       // Button text or Label for input
+    value?: string;       // Initial value for input/text
+    placeholder?: string; // For inputs
+    options?: string[];   // For dropdowns
+    width?: string;       // CSS width (e.g. "100px")
+    tooltip?: string;
+    icon?: string;
+    onClick?: () => void;
+    onChange?: (value: string) => void;
+}
+
+export interface TopbarItemControl {
+    update(options: Partial<TopbarItemOptions>): void;
+    dispose(): void;
+}
+
+// Internal representation in Registry
+export interface RegisteredTopbarItem extends TopbarItemOptions {
+    pluginId: string;
+}
+
 // --- Contribution Types ---
 
 export interface SidebarTab {
@@ -81,6 +109,8 @@ export interface HostAPI {
   // [PHASE 2] Window / UI API (Data Driven)
   window: {
       createTreeView: <T>(viewId: string, options: TreeViewOptions<T>) => TreeView<T>;
+      // [NEW] Allow creating items on the top bar
+      createTopbarItem: (options: TopbarItemOptions) => TopbarItemControl;
       showInformationMessage: (message: string, ...items: string[]) => Promise<string | undefined>;
   };
   

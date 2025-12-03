@@ -1,5 +1,5 @@
 import { HostAPI } from "../types";
-import { MainMessage, WorkerMessage, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload } from "./messages";
+import { MainMessage, WorkerMessage, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload } from "./messages";
 import { registry } from "../Registry";
 
 export class WorkerClient {
@@ -73,8 +73,6 @@ export class WorkerClient {
             // [PHASE 2]
             case 'TREE_VIEW_REGISTER':
                 console.log(`[WorkerClient] View registered: ${payload.viewId} (Plugin: ${payload.pluginId})`);
-                // Here we could register this provider in a MainRegistry so the Sidebar knows it can query it.
-                // For now, we assume the ViewContainer Registry knows the ID, and the UI will call 'requestTreeData'.
                 break;
 
             case 'TREE_VIEW_RESPONSE': {
@@ -85,6 +83,38 @@ export class WorkerClient {
                     else req.resolve(data);
                     this.pendingDataRequests.delete(requestId);
                 }
+                break;
+            }
+
+            // [NEW] Topbar Registration
+            case 'REGISTER_TOPBAR_ITEM': {
+                const { id, pluginId, options } = payload as RegisterTopbarItemPayload;
+                
+                registry.registerTopbarItem({
+                    ...options,
+                    pluginId,
+                    // Bridge events back to worker
+                    onClick: () => {
+                        const msg: WorkerMessage = {
+                            type: 'TOPBAR_ITEM_EVENT',
+                            payload: { id, type: 'onClick' }
+                        };
+                        this.worker.postMessage(msg);
+                    },
+                    onChange: (val: string) => {
+                        const msg: WorkerMessage = {
+                            type: 'TOPBAR_ITEM_EVENT',
+                            payload: { id, type: 'onChange', value: val }
+                        };
+                        this.worker.postMessage(msg);
+                    }
+                });
+                break;
+            }
+
+            case 'UPDATE_TOPBAR_ITEM': {
+                const { id, options } = payload as UpdateTopbarItemPayload;
+                registry.updateTopbarItem(id, options);
                 break;
             }
         }

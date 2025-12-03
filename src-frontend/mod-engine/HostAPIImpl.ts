@@ -1,4 +1,4 @@
-import { HostAPI, PluginManifest, TreeViewOptions, TreeView } from "./types";
+import { HostAPI, PluginManifest, TreeViewOptions, TreeView, TopbarItemOptions, TopbarItemControl } from "./types";
 import { Editor } from "@tiptap/react";
 import { registry } from "./Registry";
 import { invoke } from "@tauri-apps/api/core";
@@ -31,8 +31,6 @@ export const createHostAPI = (
     window: {
       createTreeView: <T>(viewId: string, options: TreeViewOptions<T>): TreeView<T> => {
         console.log(`[Main] TreeView registered: ${viewId}`);
-        // In the future, this would register the provider with a UI Registry 
-        // that the Sidebar component subscribes to.
         return {
           dispose: () => console.log(`[Main] TreeView disposed: ${viewId}`),
           reveal: async (element, options) => {
@@ -40,10 +38,16 @@ export const createHostAPI = (
           }
         };
       },
+      // [NEW] Local implementation (for local plugins)
+      createTopbarItem: (options: TopbarItemOptions): TopbarItemControl => {
+         registry.registerTopbarItem({ ...options, pluginId: 'host-local' });
+         return {
+             update: (opt) => registry.updateTopbarItem(options.id, opt),
+             dispose: () => registry.removeTopbarItem(options.id)
+         };
+      },
       showInformationMessage: async (message: string, ...items: string[]) => {
-        // Maps to existing UI notification for now
         setWarningMsg(message);
-        // If we implemented buttons (items), we would return the selected one here
         return undefined;
       }
     },
@@ -90,9 +94,7 @@ export const createHostAPI = (
           return await invoke<number[]>("read_file_content", { path: resolvePath(path) });
         },
         writeFile: async (path: string, content: number[]) => {
-          // 1. Write locally
           await invoke("write_file_content", { path: resolvePath(path), content });
-          // 2. Broadcast to peers so they also have the file [FIX]
           await invoke("broadcast_update", { path, data: content });
         },
         createDirectory: async (path: string) => {
@@ -115,7 +117,6 @@ export const createScopedAPI = (baseApi: HostAPI, pluginId: string, permissions:
     ...baseApi,
     data: {
       ...baseApi.data,
-      // Wrap File System calls with permission check
       fs: {
         readFile: async (path: string) => {
           if (!hasPermission("filesystem")) {

@@ -1,4 +1,4 @@
-import { Mod, SidebarTab, HostAPI, PluginManifest, ViewContainerContribution, ViewContribution } from "./types";
+import { Mod, SidebarTab, HostAPI, PluginManifest, ViewContainerContribution, ViewContribution, RegisteredTopbarItem } from "./types";
 
 interface SlashCommandDef {
     id: string; 
@@ -24,6 +24,7 @@ class Registry {
   // UI Elements
   private sidebarTabs: SidebarTab[] = [];
   private slashCommands: SlashCommandDef[] = [];
+  private topbarItems: RegisteredTopbarItem[] = []; // [NEW]
   
   // [PHASE 1] Static Contributions
   private viewContainers: RegisteredViewContainer[] = [];
@@ -32,6 +33,9 @@ class Registry {
   // Command Handlers
   private commandHandlers = new Map<string, (args?: any) => void>();
   
+  // Event Emitters
+  private listeners: (() => void)[] = [];
+
   private api: HostAPI | null = null;
 
   init(api: HostAPI) {
@@ -40,11 +44,25 @@ class Registry {
     this.highPriorityExtensions = []; 
     this.sidebarTabs = [];
     this.slashCommands = [];
+    this.topbarItems = [];
     this.commandHandlers.clear();
     
     // Clear Static
     this.viewContainers = [];
     this.views.clear();
+    this.notify();
+  }
+
+  // --- Subscription ---
+  subscribe(listener: () => void) {
+      this.listeners.push(listener);
+      return () => {
+          this.listeners = this.listeners.filter(l => l !== listener);
+      };
+  }
+
+  private notify() {
+      this.listeners.forEach(l => l());
   }
 
   // --- [PHASE 1] Static Registration ---
@@ -101,14 +119,10 @@ class Registry {
     }
   }
 
-  getExtensions() {
-    return this.dynamicExtensions;
-  }
+  getExtensions() { return this.dynamicExtensions; }
+  getHighPriorityExtensions() { return this.highPriorityExtensions; }
 
-  getHighPriorityExtensions() {
-    return this.highPriorityExtensions;
-  }
-
+  // --- Slash Commands ---
   registerSlashCommand(cmd: SlashCommandDef) {
     const exists = this.slashCommands.some(
       (existing) => existing.id === cmd.id && existing.command === cmd.command
@@ -117,17 +131,18 @@ class Registry {
       this.slashCommands.push(cmd);
     }
   }
-
   getAllSlashCommands() { return this.slashCommands; }
+
+  // --- Sidebar ---
   registerSidebarTab(tab: SidebarTab) { this.sidebarTabs.push(tab); }
   getSidebarTabs(): SidebarTab[] { return this.sidebarTabs; }
   
+  // --- Commands ---
   registerCommand(id: string, handler: (args?: any) => void) {
     if (this.commandHandlers.has(id)) {
         console.warn(`Command "${id}" is being overwritten.`);
     }
     this.commandHandlers.set(id, handler);
-    console.log(`Command registered: ${id}`);
   }
 
   executeCommand(id: string, args?: any) {
@@ -138,6 +153,32 @@ class Registry {
       console.warn(`Command "${id}" not found.`);
     }
   }
+
+  // --- [NEW] Topbar Items ---
+  registerTopbarItem(item: RegisteredTopbarItem) {
+      const idx = this.topbarItems.findIndex(i => i.id === item.id);
+      if (idx !== -1) {
+          this.topbarItems[idx] = item;
+      } else {
+          this.topbarItems.push(item);
+      }
+      this.notify();
+  }
+
+  updateTopbarItem(id: string, options: any) {
+      const item = this.topbarItems.find(i => i.id === id);
+      if (item) {
+          Object.assign(item, options);
+          this.notify();
+      }
+  }
+
+  removeTopbarItem(id: string) {
+      this.topbarItems = this.topbarItems.filter(i => i.id !== id);
+      this.notify();
+  }
+
+  getTopbarItems() { return this.topbarItems; }
 }
 
 export const registry = new Registry();

@@ -1,12 +1,13 @@
-// src-frontend/components/MenuBar.tsx
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { registry } from "../mod-engine/Registry";
+import { RegisteredTopbarItem } from "../mod-engine/types";
 
 interface MenuBarProps {
   onNew: () => void;
   onOpenFolder: () => void;
   onSettings: () => void;
   onQuit: () => void;
-  onSave: () => void; // Added onSave prop
+  onSave: () => void;
   currentFile: string | null;
 }
 
@@ -19,16 +20,93 @@ export const MenuBar: React.FC<MenuBarProps> = ({
   currentFile 
 }) => {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
+  const [extraItems, setExtraItems] = useState<RegisteredTopbarItem[]>([]);
 
   const toggleMenu = (menu: string) => {
     setActiveMenu(activeMenu === menu ? null : menu);
   };
 
-  React.useEffect(() => {
+  useEffect(() => {
+    // Initial Load
+    setExtraItems([...registry.getTopbarItems()]);
+
+    // Subscribe to changes
+    const unsubscribe = registry.subscribe(() => {
+        setExtraItems([...registry.getTopbarItems()]);
+    });
+
     const close = () => setActiveMenu(null);
     window.addEventListener("click", close);
-    return () => window.removeEventListener("click", close);
+    return () => {
+        window.removeEventListener("click", close);
+        unsubscribe();
+    };
   }, []);
+
+  // Helper to render dynamic items
+  const renderItem = (item: RegisteredTopbarItem) => {
+    const style = { 
+        marginLeft: '10px', 
+        fontSize: '0.8rem',
+        padding: '4px 8px',
+        background: '#313244',
+        border: '1px solid #45475a',
+        color: '#cdd6f4',
+        borderRadius: '4px',
+        cursor: 'pointer',
+        width: item.width || 'auto'
+    };
+
+    if (item.type === 'button') {
+        return (
+            <button 
+                key={item.id} 
+                style={style}
+                onClick={(e) => { e.stopPropagation(); item.onClick?.(); }}
+                title={item.tooltip}
+            >
+                {item.icon && <span style={{marginRight: item.label ? '5px':0}}>{item.icon}</span>}
+                {item.label}
+            </button>
+        );
+    } 
+    
+    if (item.type === 'text') {
+        return (
+            <div key={item.id} style={{ display: 'flex', alignItems: 'center', marginLeft: '10px' }}>
+                {item.label && <span style={{marginRight: '5px', fontSize: '0.8rem', color:'#a6adc8'}}>{item.label}</span>}
+                <input 
+                    type="text" 
+                    placeholder={item.placeholder}
+                    defaultValue={item.value}
+                    style={{ ...style, cursor: 'text' }}
+                    onChange={(e) => item.onChange?.(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                />
+            </div>
+        );
+    }
+
+    if (item.type === 'dropdown') {
+        return (
+            <div key={item.id} style={{ display: 'flex', alignItems: 'center', marginLeft: '10px' }}>
+                 {item.label && <span style={{marginRight: '5px', fontSize: '0.8rem', color:'#a6adc8'}}>{item.label}</span>}
+                 <select 
+                    style={style}
+                    defaultValue={item.value}
+                    onChange={(e) => item.onChange?.(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                 >
+                     {item.options?.map(opt => (
+                         <option key={opt} value={opt}>{opt}</option>
+                     ))}
+                 </select>
+            </div>
+        )
+    }
+
+    return null;
+  };
 
   return (
     <div className="top-bar" onClick={(e) => e.stopPropagation()}>
@@ -40,7 +118,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             <div className="separator" />
             <div onClick={() => { onOpenFolder(); setActiveMenu(null); }}>Open Folder...</div>
             <div className="separator" />
-            <div onClick={() => { onSave(); setActiveMenu(null); }}>Save</div> {/* Added Save Item */}
+            <div onClick={() => { onSave(); setActiveMenu(null); }}>Save</div>
             <div className="separator" />
             <div onClick={() => { onSettings(); setActiveMenu(null); }}>Settings</div>
             <div className="separator" />
@@ -48,6 +126,12 @@ export const MenuBar: React.FC<MenuBarProps> = ({
           </div>
         )}
       </div>
+      
+      {/* Plugin Items Area */}
+      <div className="plugin-toolbar" style={{ display: 'flex', alignItems: 'center', borderLeft: '1px solid #313244', paddingLeft: '10px', height: '100%' }}>
+          {extraItems.map(item => renderItem(item))}
+      </div>
+
       <div className="current-file-label">
         {currentFile ? `Editing: ${currentFile}` : "Untitled (Unsaved)"}
       </div>
