@@ -1,4 +1,4 @@
-import { HostAPI, PluginManifest, TreeViewOptions, TreeView, TopbarItemOptions, TopbarItemControl } from "./types";
+import { HostAPI, PluginManifest, TreeViewOptions, TreeView, TopbarItemOptions, TopbarItemControl, BlockDefinition } from "./types";
 import { Editor } from "@tiptap/react";
 import { registry } from "./Registry";
 import { invoke } from "@tauri-apps/api/core";
@@ -17,34 +17,28 @@ export const createHostAPI = (
   pluginManager?: PluginManager 
 ): HostAPI => {
   
-  // Helper to resolve paths relative to root
   const resolvePath = (path: string) => {
     const root = getRootPath();
-    if (!root) return path; // Fallback if no project open
-    if (path.startsWith("/") || path.match(/^[a-zA-Z]:/)) return path; // Already absolute
+    if (!root) return path;
+    if (path.startsWith("/") || path.match(/^[a-zA-Z]:/)) return path; 
     const sep = root.includes("\\") ? "\\" : "/";
     return `${root}${sep}${path}`;
   };
 
   return {
-    // [PHASE 4] Event Bus
     events: {
         emit: (event, data) => registry.emit(event, data),
         on: (event, handler) => registry.on(event, handler)
     },
 
-    // [PHASE 2] Window API Implementation
     window: {
       createTreeView: <T>(viewId: string, options: TreeViewOptions<T>): TreeView<T> => {
         console.log(`[Main] TreeView registered: ${viewId}`);
         return {
           dispose: () => console.log(`[Main] TreeView disposed: ${viewId}`),
-          reveal: async (element, options) => {
-            console.log(`[Main] Reveal requested for ${viewId}`, element);
-          }
+          reveal: async (element, options) => {}
         };
       },
-      // [NEW] Local implementation (for local plugins)
       createTopbarItem: (options: TopbarItemOptions): TopbarItemControl => {
          registry.registerTopbarItem({ ...options, pluginId: 'host-local' });
          return {
@@ -62,12 +56,41 @@ export const createHostAPI = (
       getSafeInstance: () => getEditor(),
       getCommands: () => getEditor()?.commands || null,
       getState: () => getEditor()?.state || null,
+      
       registerExtension: (ext, options) => {
         const priority = options?.priority || 'normal';
         registry.registerExtension(ext, priority);
         console.log(`Extension registered (Priority: ${priority})`);
+        
+        // [FIX] Safer injection that doesn't crash if methods are missing
+        const editor = getEditor();
+        if (editor) {
+            try {
+                // @ts-ignore
+                if (editor.extensionManager && editor.extensionManager.extensions) {
+                     // @ts-ignore
+                    editor.extensionManager.extensions.push(ext);
+                    
+                    // [REMOVED] editor.extensionManager.sortExtensions(); 
+                    // Tiptap doesn't support live schema updates easily. 
+                    // The App must re-mount the editor to apply new nodes fully.
+                    console.log("Registered extension for next editor reload.");
+                }
+            } catch(e) {
+                console.warn("Could not register extension.", e);
+            }
+        }
+      },
+
+      registerBlock: (definition: BlockDefinition) => {
+          console.warn("registerBlock should be called via Worker proxy.");
+      },
+      
+      postMessage: (instanceId: string, event: string, data: any) => {
+          registry.emit(`worker-block-msg:${instanceId}`, { event, data });
       }
     },
+    
     ui: {
       registerSidebarTab: (tab) => {
         registry.registerSidebarTab(tab);

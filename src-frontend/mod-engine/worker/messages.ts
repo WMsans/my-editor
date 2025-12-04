@@ -1,10 +1,10 @@
 export interface WorkerMessage {
-    type: 'LOAD' | 'EXEC_COMMAND' | 'API_RESPONSE' | 'DEACTIVATE' | 'TREE_VIEW_REQUEST' | 'TOPBAR_ITEM_EVENT' | 'EVENT'; 
+    type: 'LOAD' | 'EXEC_COMMAND' | 'API_RESPONSE' | 'DEACTIVATE' | 'TREE_VIEW_REQUEST' | 'TOPBAR_ITEM_EVENT' | 'EVENT' | 'BLOCK_INSTANCE_EVENT'; 
     payload: any;
 }
 
 export interface MainMessage {
-    type: 'API_REQUEST' | 'LOG' | 'REGISTER_COMMAND_PROXY' | 'TREE_VIEW_REGISTER' | 'TREE_VIEW_RESPONSE' | 'REGISTER_TOPBAR_ITEM' | 'UPDATE_TOPBAR_ITEM' | 'EMIT_EVENT';
+    type: 'API_REQUEST' | 'LOG' | 'REGISTER_COMMAND_PROXY' | 'TREE_VIEW_REGISTER' | 'TREE_VIEW_RESPONSE' | 'REGISTER_TOPBAR_ITEM' | 'UPDATE_TOPBAR_ITEM' | 'EMIT_EVENT' | 'REGISTER_BLOCK_PROXY' | 'BLOCK_INSTANCE_EVENT';
     payload: any;
 }
 
@@ -69,6 +69,19 @@ export interface TopbarItemEventPayload {
 
 // [PHASE 4] Event Bus Payloads
 export interface EventPayload {
+    event: string;
+    data: any;
+}
+
+// [PHASE 1] Block Proxy Payloads
+export interface RegisterBlockProxyPayload {
+    type: string;        // Tiptap node name (e.g., 'simulationBlock')
+    initialHtml: string; // HTML template
+    pluginId: string;
+}
+
+export interface BlockInstanceEventPayload {
+    instanceId: string;
     event: string;
     data: any;
 }

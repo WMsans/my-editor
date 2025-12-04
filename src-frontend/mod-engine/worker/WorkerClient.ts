@@ -1,6 +1,11 @@
 import { HostAPI } from "../types";
-import { MainMessage, WorkerMessage, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, EventPayload } from "./messages";
+import { MainMessage, WorkerMessage, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, EventPayload, RegisterBlockProxyPayload, BlockInstanceEventPayload } from "./messages";
 import { registry } from "../Registry";
+
+// Tiptap Imports for Dynamic Factory
+import { Node, mergeAttributes } from "@tiptap/core";
+import { ReactNodeViewRenderer } from "@tiptap/react";
+import { WorkerNodeView } from "../../components/WorkerNodeView";
 
 export class WorkerClient {
     private worker: Worker;
@@ -22,6 +27,19 @@ export class WorkerClient {
             const msg: WorkerMessage = {
                 type: 'EVENT',
                 payload: { event, data }
+            };
+            this.worker.postMessage(msg);
+        });
+
+        // [NEW] Bridge Block Actions: UI -> Worker
+        registry.on('worker-block-action', (payload: any) => {
+            const msg: WorkerMessage = {
+                type: 'BLOCK_INSTANCE_EVENT',
+                payload: {
+                    instanceId: payload.instanceId,
+                    event: payload.event,
+                    data: payload.data // Pass through
+                }
             };
             this.worker.postMessage(msg);
         });
@@ -130,9 +148,62 @@ export class WorkerClient {
             // [PHASE 4] Bridge Events: Worker -> Registry
             case 'EMIT_EVENT': {
                 const { event, data } = payload as EventPayload;
-                // We emit to registry, which will trigger our subscription above
-                // and echo back to worker. The worker handles this echo gracefully.
                 registry.emit(event, data);
+                break;
+            }
+
+            // [PHASE 3] Dynamic Block Registration
+            case 'REGISTER_BLOCK_PROXY': {
+                const { type: blockType, initialHtml, pluginId } = payload as RegisterBlockProxyPayload;
+                
+                console.log(`[WorkerClient] Creating dynamic block '${blockType}' for ${pluginId}`);
+
+                // Dynamically create the Tiptap Node
+                const DynamicWorkerNode = Node.create({
+                    name: blockType,
+                    group: 'block',
+                    atom: true,
+
+                    addAttributes() {
+                        return {
+                            instanceId: { default: null },
+                            // Store arbitrary data from worker
+                            state: { default: {} }
+                        };
+                    },
+
+                    addOptions() {
+                        return {
+                            initialHtml,
+                            pluginId
+                        }
+                    },
+
+                    parseHTML() {
+                        return [{ tag: `worker-block[type="${blockType}"]` }];
+                    },
+
+                    renderHTML({ HTMLAttributes }) {
+                        return [`worker-block`, mergeAttributes(HTMLAttributes, { type: blockType })];
+                    },
+
+                    addNodeView() {
+                        return ReactNodeViewRenderer(WorkerNodeView);
+                    }
+                });
+
+                // Register with Host API (which should push to Editor)
+                // Note: HostAPIImpl needs to handle live registration if possible, 
+                // or this takes effect on next reload.
+                this.api.editor.registerExtension(DynamicWorkerNode, { priority: 'normal' });
+                break;
+            }
+
+            // [PHASE 4] Instance Messaging: Worker -> UI
+            case 'BLOCK_INSTANCE_EVENT': {
+                const { instanceId, event, data } = payload as BlockInstanceEventPayload;
+                // Dispatch to specific UI component via registry channel
+                registry.emit(`worker-block-msg:${instanceId}`, { event, data });
                 break;
             }
         }
@@ -162,6 +233,9 @@ export class WorkerClient {
             } else if (module === 'plugins') {
                 // @ts-ignore
                 result = await this.api.plugins[method](...args);
+            } else if (module === 'editor') {
+                // @ts-ignore
+                result = this.api.editor[method](...args);
             } else {
                 throw new Error(`Module ${module} not accessible from worker`);
             }

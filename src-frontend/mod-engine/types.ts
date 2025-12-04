@@ -79,6 +79,14 @@ export interface RegisteredTopbarItem extends TopbarItemOptions {
     pluginId: string;
 }
 
+// --- Block Definitions ---
+export interface BlockDefinition {
+    type: string;
+    template: string; // HTML string
+    // Handlers are managed internally by the worker wrapper
+    onEvent?: (instanceId: string, event: string, data: any) => void;
+}
+
 // --- Contribution Types ---
 
 export interface SidebarTab {
@@ -126,6 +134,10 @@ export interface HostAPI {
   
   editor: {
     registerExtension: (ext: Node | Extension, options?: { priority?: 'high' | 'normal' }) => void;
+    // [NEW] Worker Block API
+    registerBlock: (definition: BlockDefinition) => void;
+    postMessage: (instanceId: string, event: string, data: any) => void;
+
     getCommands: () => any; 
     getState: () => EditorState | null;
     getSafeInstance: () => Editor | null;

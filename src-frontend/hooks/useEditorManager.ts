@@ -9,15 +9,16 @@ export function useEditorManager(
   getRelativePath: (path: string | null) => string | null,
   isHost: boolean,
   isJoining: boolean,
-  requestSync: (path: string) => Promise<void>
+  requestSync: (path: string) => Promise<void>,
+  isAppReady: boolean // [FIX] Add param
 ) {
   const [currentDoc, setCurrentDoc] = useState<Y.Doc>(() => new Y.Doc());
   const [isSyncing, setIsSyncing] = useState(false);
   
   const relativeFilePath = getRelativePath(currentFilePath);
   
-  // Initialize Editor
-  const { editor } = useCollaborativeEditor(currentDoc);
+  // [FIX] Pass isAppReady to editor hook
+  const { editor } = useCollaborativeEditor(currentDoc, isAppReady);
 
   // Manage Editable State
   useEffect(() => {
