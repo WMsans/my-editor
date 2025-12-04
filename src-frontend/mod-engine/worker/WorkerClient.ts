@@ -86,6 +86,13 @@ export class WorkerClient {
                 break;
             }
 
+            case 'INSERT_CONTENT': {
+                const { content } = payload;
+                // Execute on the Host API which has access to the Editor instance
+                this.api.editor.insertContent(content);
+                break;
+            }
+
             case 'API_REQUEST':
                 await this.handleApiRequest(payload);
                 break;

@@ -151,6 +151,12 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
                      payload: { id, options, pluginId }
                  });
             },
+            insertContent: (content) => {
+                self.postMessage({
+                    type: 'INSERT_CONTENT',
+                    payload: { content, pluginId }
+                });
+            },
             getCommands: () => ({}),
             getState: () => null,
             getSafeInstance: () => null,

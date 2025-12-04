@@ -69,11 +69,13 @@ export const createHostAPI = (
         registry.registerExtension(ext, priority);
         console.log(`Extension registered (Priority: ${priority})`);
       },
-      // [NEW] Main Thread implementation
       registerWebviewBlock: (id, options) => {
          const ext = createWebviewBlockExtension({ id, ...options });
          registry.registerExtension(ext);
          console.log(`[Main] Registered Webview Block: ${id}`);
+      },
+      insertContent: (content) => {
+        getEditor()?.chain().focus().insertContent(content).run();
       }
     },
     ui: {
