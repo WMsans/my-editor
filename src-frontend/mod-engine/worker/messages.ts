@@ -4,7 +4,7 @@ export interface WorkerMessage {
 }
 
 export interface MainMessage {
-    type: 'API_REQUEST' | 'LOG' | 'REGISTER_COMMAND_PROXY' | 'TREE_VIEW_REGISTER' | 'TREE_VIEW_RESPONSE' | 'REGISTER_TOPBAR_ITEM' | 'UPDATE_TOPBAR_ITEM' | 'EMIT_EVENT';
+    type: 'API_REQUEST' | 'LOG' | 'REGISTER_COMMAND_PROXY' | 'TREE_VIEW_REGISTER' | 'TREE_VIEW_RESPONSE' | 'REGISTER_TOPBAR_ITEM' | 'UPDATE_TOPBAR_ITEM' | 'EMIT_EVENT' | 'PLUGIN_ACTIVATED';
     payload: any;
 }
 
@@ -80,5 +80,9 @@ export interface RegisterWebviewBlockPayload {
         initialScript?: string;
         attributes?: Record<string, any>;
     };
+    pluginId: string;
+}
+
+export interface PluginActivatedPayload {
     pluginId: string;
 }

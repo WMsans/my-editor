@@ -215,15 +215,6 @@ body {
   color: #1e1e2e;
 }
 
-/* Simulation Block & Slash Menu */
-.simulation-block {
-  border: 1px solid #45475a;
-  border-radius: 6px;
-  background: #181825;
-  margin: 1rem 0;
-  overflow: hidden;
-}
-
 .block-header {
   background: #313244;
   padding: 5px 10px;
@@ -232,41 +223,6 @@ body {
   align-items: center;
   font-size: 0.8rem;
   color: #a6adc8;
-}
-
-.simulation-content {
-  display: flex;
-  height: 200px;
-}
-
-.simulation-content textarea {
-  flex: 1;
-  background: #11111b;
-  color: #a6e3a1;
-  border: none;
-  padding: 10px;
-  font-family: monospace;
-  resize: none;
-}
-
-.canvas-wrapper {
-  flex: 1;
-  background: #000;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  position: relative;
-}
-
-.error-log {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: rgba(255, 0, 0, 0.8);
-  color: white;
-  font-size: 0.7rem;
-  padding: 2px;
 }
 
 .slash-menu {

@@ -9,6 +9,9 @@ export class WorkerClient {
     
     // [PHASE 2] Request Tracking
     private pendingDataRequests = new Map<string, { resolve: Function, reject: Function }>();
+    
+    // [FIX] Tracking Plugin Activation Promises
+    private pendingActivations = new Map<string, { resolve: () => void, reject: (err: any) => void }>();
 
     constructor(api: HostAPI) {
         this.api = api;
@@ -28,12 +31,17 @@ export class WorkerClient {
         });
     }
 
-    loadPlugin(pluginId: string, code: string, manifest: any) {
-        const msg: WorkerMessage = {
-            type: 'LOAD',
-            payload: { pluginId, code, manifest }
-        };
-        this.worker.postMessage(msg);
+    loadPlugin(pluginId: string, code: string, manifest: any): Promise<void> {
+        return new Promise((resolve, reject) => {
+            // [FIX] Store the promise to wait for 'PLUGIN_ACTIVATED'
+            this.pendingActivations.set(pluginId, { resolve, reject });
+
+            const msg: WorkerMessage = {
+                type: 'LOAD',
+                payload: { pluginId, code, manifest }
+            };
+            this.worker.postMessage(msg);
+        });
     }
 
     deactivatePlugin(pluginId: string) {
@@ -67,6 +75,17 @@ export class WorkerClient {
             case 'LOG':
                 console.log(`[Worker] ${payload.message}`);
                 break;
+            
+            // [FIX] Handle Activation Signal
+            case 'PLUGIN_ACTIVATED': {
+                const { pluginId } = payload;
+                const p = this.pendingActivations.get(pluginId);
+                if (p) {
+                    p.resolve();
+                    this.pendingActivations.delete(pluginId);
+                }
+                break;
+            }
 
             case 'REGISTER_COMMAND_PROXY':
                 registry.registerCommand(payload.id, (args) => {
