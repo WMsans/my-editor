@@ -122,8 +122,12 @@ export function activate(context: HostAPI) {
   });
 
   // --- 4. Register Insert Command ---
-  context.commands.registerCommand("simulation.insert", () => {
-    // We added 'insertContent' to HostAPI to support worker logic
-    context.editor.insertContent({ type: BLOCK_ID });
+  context.commands.registerCommand("simulation.insert", (args: any) => {
+    const content = { type: BLOCK_ID };
+    if (args && args.range) {
+        context.editor.insertContentAt(args.range, content);
+    } else {
+        context.editor.insertContent(content);
+    }
   });
 }

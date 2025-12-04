@@ -1,4 +1,4 @@
-import { WorkerMessage, MainMessage, ApiRequestPayload, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, TopbarItemEventPayload, EventPayload, RegisterWebviewBlockPayload } from "./messages";
+import { WorkerMessage, MainMessage, ApiRequestPayload, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, TopbarItemEventPayload, EventPayload, RegisterWebviewBlockPayload, ApplyEditPayload } from "./messages";
 import { HostAPI, TreeDataProvider, TreeItem, TopbarItemOptions } from "../types";
 
 // --- State ---
@@ -152,9 +152,17 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
                  });
             },
             insertContent: (content) => {
+                const payload: ApplyEditPayload = { action: 'insert', content };
                 self.postMessage({
-                    type: 'INSERT_CONTENT',
-                    payload: { content, pluginId }
+                    type: 'APPLY_EDIT',
+                    payload
+                });
+            },
+            insertContentAt: (range, content) => {
+                 const payload: ApplyEditPayload = { action: 'replace', content, range };
+                 self.postMessage({
+                    type: 'APPLY_EDIT',
+                    payload
                 });
             },
             getCommands: () => ({}),

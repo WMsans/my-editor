@@ -3,7 +3,6 @@ import { Editor } from "@tiptap/react";
 import { registry } from "./Registry";
 import { invoke } from "@tauri-apps/api/core";
 import * as Y from "yjs";
-// Import the factory to support it on Main thread too
 import { createWebviewBlockExtension } from "../components/WebviewBlock";
 
 interface PluginManager {
@@ -76,6 +75,9 @@ export const createHostAPI = (
       },
       insertContent: (content) => {
         getEditor()?.chain().focus().insertContent(content).run();
+      },
+      insertContentAt: (range, content) => {
+        getEditor()?.chain().focus().insertContentAt(range, content).run();
       }
     },
     ui: {

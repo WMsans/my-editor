@@ -42,12 +42,15 @@ export const SlashMenu: React.FC<SlashMenuProps> = ({ editor }) => {
   }, [editor]);
 
   const executeCommand = (cmdDef: any) => {
-    // 1. Delete the "/" that triggered the menu
-    editor.commands.deleteRange({ from: editor.state.selection.from - 1, to: editor.state.selection.from });
+    // Pass the range of the trigger character ("/") to the command.
+    const range = { 
+        from: editor.state.selection.from - 1, 
+        to: editor.state.selection.from 
+    };
     
-    // 2. [CHANGED] Execute the command via registry dynamically
-    // The plugin should have registered this command string via context.commands.registerCommand
-    registry.executeCommand(cmdDef.command);
+    // Execute the command via registry dynamically
+    // The command handler (worker or main) is responsible for replacing this range.
+    registry.executeCommand(cmdDef.command, { range });
     
     setIsOpen(false);
   };

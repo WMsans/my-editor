@@ -1,5 +1,5 @@
 export interface WorkerMessage {
-    type: 'LOAD' | 'EXEC_COMMAND' | 'API_RESPONSE' | 'DEACTIVATE' | 'TREE_VIEW_REQUEST' | 'TOPBAR_ITEM_EVENT' | 'EVENT' | 'REGISTER_WEBVIEW_BLOCK' | 'INSERT_CONTENT'; 
+    type: 'LOAD' | 'EXEC_COMMAND' | 'API_RESPONSE' | 'DEACTIVATE' | 'TREE_VIEW_REQUEST' | 'TOPBAR_ITEM_EVENT' | 'EVENT' | 'REGISTER_WEBVIEW_BLOCK' | 'APPLY_EDIT'; 
     payload: any;
 }
 
@@ -81,4 +81,10 @@ export interface RegisterWebviewBlockPayload {
         attributes?: Record<string, any>;
     };
     pluginId: string;
+}
+
+export interface ApplyEditPayload {
+    action: 'insert' | 'replace';
+    content: any;
+    range?: { from: number; to: number };
 }

@@ -1,5 +1,5 @@
 import { HostAPI } from "../types";
-import { MainMessage, WorkerMessage, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, EventPayload, RegisterWebviewBlockPayload } from "./messages";
+import { MainMessage, WorkerMessage, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, EventPayload, RegisterWebviewBlockPayload, ApplyEditPayload } from "./messages";
 import { registry } from "../Registry";
 import { createWebviewBlockExtension } from "../../components/WebviewBlock.tsx";
 
@@ -86,10 +86,15 @@ export class WorkerClient {
                 break;
             }
 
-            case 'INSERT_CONTENT': {
-                const { content } = payload;
-                // Execute on the Host API which has access to the Editor instance
-                this.api.editor.insertContent(content);
+            case 'APPLY_EDIT': {
+                const { action, content, range } = payload as ApplyEditPayload;
+                if (action === 'insert' || action === 'replace') {
+                    if (range) {
+                        this.api.editor.insertContentAt(range, content);
+                    } else {
+                        this.api.editor.insertContent(content);
+                    }
+                }
                 break;
             }
 
