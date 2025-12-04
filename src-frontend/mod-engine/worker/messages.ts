@@ -1,5 +1,5 @@
 export interface WorkerMessage {
-    type: 'LOAD' | 'EXEC_COMMAND' | 'API_RESPONSE' | 'DEACTIVATE' | 'TREE_VIEW_REQUEST' | 'TOPBAR_ITEM_EVENT' | 'EVENT'; 
+    type: 'LOAD' | 'EXEC_COMMAND' | 'API_RESPONSE' | 'DEACTIVATE' | 'TREE_VIEW_REQUEST' | 'TOPBAR_ITEM_EVENT' | 'EVENT' | 'REGISTER_WEBVIEW_BLOCK'; 
     payload: any;
 }
 
@@ -71,4 +71,14 @@ export interface TopbarItemEventPayload {
 export interface EventPayload {
     event: string;
     data: any;
+}
+
+export interface RegisterWebviewBlockPayload {
+    id: string;
+    options: {
+        initialHtml: string;
+        initialScript?: string;
+        attributes?: Record<string, any>;
+    };
+    pluginId: string;
 }

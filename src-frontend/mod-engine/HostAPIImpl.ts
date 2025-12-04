@@ -3,6 +3,8 @@ import { Editor } from "@tiptap/react";
 import { registry } from "./Registry";
 import { invoke } from "@tauri-apps/api/core";
 import * as Y from "yjs";
+// Import the factory to support it on Main thread too
+import { createWebviewBlockExtension } from "../components/WebviewBlock";
 
 interface PluginManager {
   getAll: () => Promise<PluginManifest[]>;
@@ -66,6 +68,12 @@ export const createHostAPI = (
         const priority = options?.priority || 'normal';
         registry.registerExtension(ext, priority);
         console.log(`Extension registered (Priority: ${priority})`);
+      },
+      // [NEW] Main Thread implementation
+      registerWebviewBlock: (id, options) => {
+         const ext = createWebviewBlockExtension({ id, ...options });
+         registry.registerExtension(ext);
+         console.log(`[Main] Registered Webview Block: ${id}`);
       }
     },
     ui: {

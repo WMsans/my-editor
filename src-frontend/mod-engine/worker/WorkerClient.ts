@@ -1,6 +1,7 @@
 import { HostAPI } from "../types";
-import { MainMessage, WorkerMessage, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, EventPayload } from "./messages";
+import { MainMessage, WorkerMessage, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, EventPayload, RegisterWebviewBlockPayload } from "./messages";
 import { registry } from "../Registry";
+import { createWebviewBlockExtension } from "../../components/WebviewBlock.tsx";
 
 export class WorkerClient {
     private worker: Worker;
@@ -57,8 +58,10 @@ export class WorkerClient {
         });
     }
 
-    private async handleMessage(e: MessageEvent<MainMessage>) {
-        const { type, payload } = e.data;
+    private async handleMessage(e: MessageEvent<any>) {
+        // cast e.data to MainMessage manually to avoid union issues with new types
+        const data = e.data as any; 
+        const { type, payload } = data;
 
         switch (type) {
             case 'LOG':
@@ -74,6 +77,14 @@ export class WorkerClient {
                     this.worker.postMessage(msg);
                 });
                 break;
+            
+            case 'REGISTER_WEBVIEW_BLOCK': {
+                const { id, options } = payload as RegisterWebviewBlockPayload;
+                const extension = createWebviewBlockExtension({ id, ...options });
+                registry.registerExtension(extension);
+                console.log(`[WorkerClient] Registered Webview Block: ${id}`);
+                break;
+            }
 
             case 'API_REQUEST':
                 await this.handleApiRequest(payload);

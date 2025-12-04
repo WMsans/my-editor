@@ -1,4 +1,4 @@
-import { WorkerMessage, MainMessage, ApiRequestPayload, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, TopbarItemEventPayload, EventPayload } from "./messages";
+import { WorkerMessage, MainMessage, ApiRequestPayload, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, TopbarItemEventPayload, EventPayload, RegisterWebviewBlockPayload } from "./messages";
 import { HostAPI, TreeDataProvider, TreeItem, TopbarItemOptions } from "../types";
 
 // --- State ---
@@ -145,6 +145,12 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
         editor: {
             // Stubbed for Types; Workers can't access Editor directly yet
             registerExtension: () => {},
+            registerWebviewBlock: (id, options) => {
+                 self.postMessage({
+                     type: 'REGISTER_WEBVIEW_BLOCK',
+                     payload: { id, options, pluginId }
+                 });
+            },
             getCommands: () => ({}),
             getState: () => null,
             getSafeInstance: () => null,
@@ -258,7 +264,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                     response.error = e.toString();
                 }
             }
-
+            // @ts-ignore
             postToMain({ type: 'TREE_VIEW_RESPONSE', payload: response });
             break;
         }
