@@ -1,5 +1,5 @@
-import { WorkerMessage, MainMessage, ApiRequestPayload, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, TopbarItemEventPayload, EventPayload, RegisterBlockProxyPayload, BlockInstanceEventPayload } from "./messages";
-import { HostAPI, TreeDataProvider, TreeItem, TopbarItemOptions, BlockDefinition } from "../types";
+import { WorkerMessage, MainMessage, ApiRequestPayload, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, TopbarItemEventPayload, EventPayload } from "./messages";
+import { HostAPI, TreeDataProvider, TreeItem, TopbarItemOptions } from "../types";
 
 // --- State ---
 const commandHandlers = new Map<string, Function>();
@@ -12,9 +12,6 @@ const topbarEventHandlers = new Map<string, { onChange?: Function, onClick?: Fun
 
 // [PHASE 4] Event Listeners
 const eventListeners = new Map<string, ((data: any) => void)[]>();
-// Block Event Handlers: Map<BlockType, Map<InstanceId, Handler>> ?? 
-// Actually simpler: Map<BlockType, Handler(instanceId, event, data)>
-const blockEventHandlers = new Map<string, (instanceId: string, event: string, data: any) => void>();
 
 // --- Helper: Send to Main ---
 const postToMain = (msg: MainMessage) => {
@@ -73,6 +70,7 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
                 console.log(`[Worker] Registering TreeView: ${viewId}`);
                 treeDataProviders.set(viewId, options.treeDataProvider);
                 
+                // Notify Main thread that this view is now backed by data
                 postToMain({ 
                     type: 'TREE_VIEW_REGISTER', 
                     payload: { viewId, pluginId } 
@@ -85,10 +83,12 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
                     }
                 };
             },
+            // [NEW] Topbar API
             createTopbarItem: (options: TopbarItemOptions) => {
                 const handlers: any = {};
                 const { ...safeOptions } = options as any;
                 
+                // Store handlers locally
                 if (safeOptions.onClick) {
                     handlers.onClick = safeOptions.onClick;
                     delete safeOptions.onClick;
@@ -99,6 +99,7 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
                 }
                 topbarEventHandlers.set(options.id, handlers);
 
+                // Send registration to main
                 const payload: RegisterTopbarItemPayload = {
                     id: options.id,
                     pluginId,
@@ -115,6 +116,7 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
                     },
                     dispose: () => {
                         topbarEventHandlers.delete(options.id);
+                        // Implement dispose message if needed
                     }
                 };
             },
@@ -124,49 +126,25 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
             }
         },
         
+        // UI: Legacy / Limited
         ui: {
             showNotification: (msg: string) => callMain('ui', 'showNotification', msg),
-            registerSidebarTab: () => console.warn(`[${pluginId}] Sidebar tabs not supported in worker mode.`)
+            registerSidebarTab: () => console.warn(`[${pluginId}] Sidebar tabs not supported in worker mode. Use window.createTreeView.`)
         },
         
+        // Commands: Local handler + Remote registration
         commands: {
             registerCommand: (id: string, handler: (args: any) => void) => {
                 commandHandlers.set(id, handler);
+                // Tell main thread to forward execution here
                 postToMain({ type: 'REGISTER_COMMAND_PROXY', payload: { id, pluginId } });
             },
             executeCommand: (id: string, args?: any) => callMain('commands', 'executeCommand', id, args)
         },
         
         editor: {
-            // [NEW] Worker Block API
-            registerBlock: (definition: BlockDefinition) => {
-                console.log(`[Worker] Registering Block: ${definition.type}`);
-                
-                // Store the handler locally if provided
-                if (definition.onEvent) {
-                    blockEventHandlers.set(definition.type, definition.onEvent);
-                }
-
-                // Send registration to main to create Tiptap node
-                // Note: We do NOT send definition.onEvent to main thread (functions can't be serialized)
-                const payload: RegisterBlockProxyPayload = {
-                    type: definition.type,
-                    initialHtml: definition.template,
-                    pluginId
-                };
-                postToMain({ type: 'REGISTER_BLOCK_PROXY', payload });
-            },
-
-            postMessage: (instanceId: string, event: string, data: any) => {
-                const payload: BlockInstanceEventPayload = {
-                    instanceId,
-                    event,
-                    data
-                };
-                postToMain({ type: 'BLOCK_INSTANCE_EVENT', payload });
-            },
-
-            registerExtension: () => {}, // Not supported in worker yet
+            // Stubbed for Types; Workers can't access Editor directly yet
+            registerExtension: () => {},
             getCommands: () => ({}),
             getState: () => null,
             getSafeInstance: () => null,
@@ -184,7 +162,7 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
         },
         plugins: {
              getAll: () => callMain('plugins', 'getAll') as Promise<any>,
-             isEnabled: () => true,
+             isEnabled: () => true, // Sync check difficult in worker
              setEnabled: (id, val) => callMain('plugins', 'setEnabled', id, val)
         }
     };
@@ -198,12 +176,14 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         case 'LOAD': {
             const { pluginId, code, manifest } = payload;
             try {
+                // Synthetic Environment
                 const api = createWorkerAPI(pluginId);
                 const exports: any = {};
                 const module = { exports };
                 
+                // [PHASE 2] Remove React/DOM injection
                 const syntheticRequire = (mod: string) => {
-                    throw new Error(`Module '${mod}' is not available in Worker environment.`);
+                    throw new Error(`Module '${mod}' is not available in Worker environment. Use the Host API.`);
                 };
 
                 const runPlugin = new Function("exports", "require", "module", "api", code);
@@ -262,6 +242,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         case 'TREE_VIEW_REQUEST': {
             const { requestId, viewId, action, element } = payload as TreeViewRequestPayload;
             const provider = treeDataProviders.get(viewId);
+            
             const response: TreeViewResponsePayload = { requestId, data: null };
 
             if (!provider) {
@@ -277,10 +258,12 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
                     response.error = e.toString();
                 }
             }
+
             postToMain({ type: 'TREE_VIEW_RESPONSE', payload: response });
             break;
         }
 
+        // Handle UI Events for Topbar
         case 'TOPBAR_ITEM_EVENT': {
              const { id, type: eventType, value } = payload as TopbarItemEventPayload;
              const handlers = topbarEventHandlers.get(id);
@@ -291,29 +274,12 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
              break;
         }
 
+        // [PHASE 4] Handle Application Events
         case 'EVENT': {
             const { event, data } = payload as EventPayload;
             const handlers = eventListeners.get(event);
             handlers?.forEach(h => {
                 try { h(data); } catch(e) { console.error(`Error in worker event listener for ${event}:`, e); }
-            });
-            break;
-        }
-
-        // [PHASE 4] Handle Block Events from UI
-        case 'BLOCK_INSTANCE_EVENT': {
-            const { instanceId, event, data } = payload;
-            // Find which block type this event belongs to? 
-            // The protocol is slightly loose here, but typically we'd know the type from the context or the payload.
-            // For simplicity, we iterate all block handlers (assuming event names are unique enough or plugins filter them).
-            // Better approach: Main thread sends 'type' in payload, or we store mapping.
-            // Current simplification: Iterate all registered blocks.
-            blockEventHandlers.forEach(handler => {
-                try {
-                    handler(instanceId, event, data);
-                } catch(e) {
-                    console.error("Error in block event handler:", e);
-                }
             });
             break;
         }

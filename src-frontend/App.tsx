@@ -156,8 +156,7 @@ function App() {
     getRelativePath,
     isHost,
     isJoining,
-    requestSync,
-    isAppReady // [FIX] Pass this flag
+    requestSync
   );
 
   // --- [NEW] API & Plugin Initialization ---
