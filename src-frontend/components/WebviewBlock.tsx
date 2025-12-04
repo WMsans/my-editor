@@ -59,6 +59,16 @@ const WebviewBlockComponent = (props: any) => {
     return () => window.removeEventListener('message', handler);
   }, [props.node.attrs.id]);
 
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (iframe && iframe.contentWindow) {
+        iframe.contentWindow.postMessage({ 
+            type: 'SYNC_ATTRS', 
+            attrs: props.node.attrs 
+        }, '*');
+    }
+  }, [props.node.attrs]); 
+
   return (
     <NodeViewWrapper className="webview-block" style={{ border: '1px solid #45475a', borderRadius: '6px', overflow: 'hidden', background: '#181825' }}>
       <iframe 

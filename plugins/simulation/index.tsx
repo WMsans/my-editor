@@ -70,6 +70,17 @@ export function activate(context: HostAPI) {
       window.updateAttributes({ code: editor.value });
     });
 
+    // Handle Remote Updates
+    window.addEventListener('message', (e) => {
+       if (e.data && e.data.type === 'SYNC_ATTRS') {
+           const newCode = e.data.attrs.code;
+           // Avoid overwriting if identical (prevents cursor jumping for local user)
+           if (editor.value !== newCode) {
+               editor.value = newCode || "";
+           }
+       }
+    });
+
     // 3. Handle Run
     const runSimulation = () => {
       const code = editor.value;
