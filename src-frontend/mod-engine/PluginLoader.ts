@@ -5,6 +5,10 @@ import { transform } from "sucrase";
 import { WorkerClient } from "./worker/WorkerClient";
 import { createScopedAPI } from "./HostAPIImpl";
 
+import * as React from "react";
+import * as TiptapReact from "@tiptap/react";
+import * as TiptapCore from "@tiptap/core";
+
 interface FileEntry {
   name: string;
   path: string;
@@ -136,12 +140,20 @@ class PluginLoaderService {
          });
       }
       else {
-        // Main thread logic (omitted for brevity, largely unused for worker plugins)
+        // [FIX] Main thread logic: Expose React and Tiptap to the synthetic 'require'
         const exports: any = {};
         const module = { exports };
+        
         const syntheticRequire = (modName: string) => {
-          throw new Error(`Module '${modName}' is not available. Use the Host API.`);
+          switch (modName) {
+            case "react": return React;
+            case "@tiptap/react": return TiptapReact;
+            case "@tiptap/core": return TiptapCore;
+            default:
+              throw new Error(`Module '${modName}' is not available. Use the Host API.`);
+          }
         };
+
         const runPlugin = new Function("exports", "require", "module", "code", code);
         runPlugin(exports, syntheticRequire, module, code);
 
