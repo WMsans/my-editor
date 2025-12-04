@@ -164,7 +164,6 @@ export interface PluginManifest {
   main: string;
   permissions?: string[];
   executionEnvironment?: 'main' | 'worker'; 
-  activationEvents?: string[]; 
 
   contributes?: {
     commands?: CommandContribution[];

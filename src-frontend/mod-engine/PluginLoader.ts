@@ -19,11 +19,9 @@ class PluginLoaderService {
   private activePlugins: Map<string, ActivePlugin> = new Map();
   private workerClient: WorkerClient | null = null;
   private allManifests: PluginManifest[] = [];
-  
-  // [PHASE 6] Lazy Loading State
-  private api: HostAPI | null = null;
-  private viewToPluginMap = new Map<string, string>(); 
 
+  // ... [Existing discoverPlugins, isPluginEnabled, setPluginEnabled methods remain unchanged] ...
+  
   async discoverPlugins(pluginsRootPath: string): Promise<PluginManifest[]> {
     try {
       const entries = await invoke<FileEntry[]>("read_directory", { path: pluginsRootPath });
@@ -72,51 +70,13 @@ class PluginLoaderService {
 
   async registerStaticContributions(manifests: PluginManifest[]) {
     for (const manifest of manifests) {
-        if (!this.isPluginEnabled(manifest.id)) continue;
-
-        // [PHASE 6] Map Views to Plugins for Lazy Loading
-        if (manifest.contributes?.views) {
-            for (const [containerId, views] of Object.entries(manifest.contributes.views)) {
-                views.forEach(v => this.viewToPluginMap.set(v.id, manifest.id));
-            }
+        if (this.isPluginEnabled(manifest.id)) {
+            registry.registerManifest(manifest);
         }
-
-        // [PHASE 6] Register Lazy Command Stubs
-        // Check ALL contribution points for commands (commands, slashMenu, keybindings)
-        if (!this.shouldActivate(manifest)) {
-            const commandsToProxy = new Set<string>();
-
-            if (manifest.contributes?.commands) {
-                manifest.contributes.commands.forEach(cmd => commandsToProxy.add(cmd.command));
-            }
-            if (manifest.contributes?.slashMenu) {
-                manifest.contributes.slashMenu.forEach(item => commandsToProxy.add(item.command));
-            }
-            
-            // Cast to any to support keybindings if not in Types
-            const keybindings = (manifest.contributes as any)?.keybindings;
-            if (Array.isArray(keybindings)) {
-                 keybindings.forEach((kb: any) => commandsToProxy.add(kb.command));
-            }
-
-            commandsToProxy.forEach(commandId => {
-                registry.registerCommand(commandId, async (args) => {
-                    console.log(`[Lazy] Triggering activation for command: ${commandId}`);
-                    await this.activatePlugin(manifest.id);
-                    // The plugin should have overwritten the command by now
-                    registry.executeCommand(commandId, args);
-                });
-            });
-        }
-
-        registry.registerManifest(manifest);
     }
   }
 
   async loadPlugins(api: HostAPI, manifests: PluginManifest[]) {
-    this.api = api; // Store API for lazy loading
-    this.setupEventListeners(); // Listen for activation triggers
-
     if (!this.workerClient) {
         this.workerClient = new WorkerClient(api);
     }
@@ -126,86 +86,13 @@ class PluginLoaderService {
           console.log(`⏸️ Plugin '${manifest.id}' is disabled.`);
           continue;
       }
-
-      // [PHASE 6] Check Activation Events
-      if (this.shouldActivate(manifest)) {
-          await this.loadSinglePlugin(api, manifest);
-      } else {
-          console.log(`💤 Plugin '${manifest.id}' is lazy loaded.`);
-      }
+      await this.loadSinglePlugin(api, manifest);
     }
-  }
-
-  // --- [PHASE 6] Lazy Activation Helpers ---
-
-  public async activatePlugin(pluginId: string) {
-      if (this.activePlugins.has(pluginId)) return;
-      
-      const manifest = this.allManifests.find(m => m.id === pluginId);
-      if (manifest && this.api) {
-          console.log(`⚡ Activating plugin: ${pluginId}`);
-          await this.loadSinglePlugin(this.api, manifest);
-      }
-  }
-
-  private shouldActivate(manifest: PluginManifest): boolean {
-      if (!manifest.activationEvents) return true; // Default to eager if undefined
-      if (manifest.activationEvents.length === 0) return true; // Empty array -> eager
-      if (manifest.activationEvents.includes('*')) return true; // Explicit eager
-      return false;
-  }
-
-  private setupEventListeners() {
-      // Listen for file opens to trigger onLanguage
-      registry.on('file:open', (data: any) => {
-          const path = data.path;
-          if (!path) return;
-          
-          const ext = path.split('.').pop()?.toLowerCase();
-          const lang = this.getLanguageFromExtension(ext);
-          
-          this.allManifests.forEach(m => {
-              if (this.activePlugins.has(m.id)) return;
-              if (!m.activationEvents) return;
-
-              // Check if any event matches
-              const hit = m.activationEvents.some(event => 
-                  event === `onLanguage:${ext}` || event === `onLanguage:${lang}`
-              );
-
-              if (hit) {
-                  console.log(`[Lazy] Triggering ${m.id} for language: ${lang}`);
-                  this.activatePlugin(m.id);
-              }
-          });
-      });
-  }
-
-  private getLanguageFromExtension(ext: string | undefined): string {
-      switch(ext) {
-          case 'ts': return 'typescript';
-          case 'tsx': return 'typescriptreact';
-          case 'js': return 'javascript';
-          case 'jsx': return 'javascriptreact';
-          case 'md': return 'markdown';
-          case 'css': return 'css';
-          case 'html': return 'html';
-          case 'json': return 'json';
-          case 'rs': return 'rust';
-          case 'py': return 'python';
-          default: return ext || '';
-      }
   }
 
   // --- [PHASE 3] Data Bridge for UI ---
 
   public async requestTreeViewData(viewId: string, element?: any) {
-    // [PHASE 6] Lazy load plugin when its view is requested
-    const pluginId = this.viewToPluginMap.get(viewId);
-    if (pluginId && !this.activePlugins.has(pluginId)) {
-        await this.activatePlugin(pluginId);
-    }
-
     if (!this.workerClient) return [];
     // 'getChildren' returns the raw data objects
     return this.workerClient.requestTreeData(viewId, 'getChildren', element);
@@ -241,8 +128,7 @@ class PluginLoaderService {
 
       if (manifest.executionEnvironment === 'worker') {
          console.log(`🚀 Loading ${manifest.name} in Worker...`);
-         // [FIX] Await the worker activation signal before returning
-         await this.workerClient?.loadPlugin(manifest.id, code, manifest);
+         this.workerClient?.loadPlugin(manifest.id, code, manifest);
          
          this.activePlugins.set(manifest.id, {
              manifest,

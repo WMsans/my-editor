@@ -205,12 +205,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
                 if (exports.activate) {
                     await exports.activate(api);
+                    postToMain({ type: 'LOG', payload: { level: 'info', message: `Worker Plugin '${pluginId}' activated.` } });
                 }
-                
-                // [FIX] Send explicit ACTIVATED signal so Main thread knows it's safe to run commands
-                postToMain({ type: 'PLUGIN_ACTIVATED', payload: { pluginId } });
-                postToMain({ type: 'LOG', payload: { level: 'info', message: `Worker Plugin '${pluginId}' activated.` } });
-
             } catch (err: any) {
                 postToMain({ type: 'LOG', payload: { level: 'error', message: `Worker Init Error (${pluginId}): ${err.toString()}` } });
             }
