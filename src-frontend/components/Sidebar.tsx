@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { FileExplorer } from "./FileExplorer";
 import { IncomingRequest } from "./IncomingRequest";
 import { registry } from "../mod-engine/Registry";
@@ -27,6 +27,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onRejectRequest
 }) => {
   const [activeTab, setActiveTab] = useState("files");
+  const [width, setWidth] = useState(250);
+  const [isResizing, setIsResizing] = useState(false);
+
+  // Resize Logic
+  const startResizing = useCallback(() => setIsResizing(true), []);
+  const stopResizing = useCallback(() => setIsResizing(false), []);
+
+  const resize = useCallback(
+    (mouseMoveEvent: MouseEvent) => {
+      if (isResizing) {
+        const newWidth = mouseMoveEvent.clientX;
+        // Limit min/max width
+        if (newWidth > 100 && newWidth < 600) {
+          setWidth(newWidth);
+        }
+      }
+    },
+    [isResizing]
+  );
+
+  useEffect(() => {
+    if (isResizing) {
+      window.addEventListener("mousemove", resize);
+      window.addEventListener("mouseup", stopResizing);
+    }
+    return () => {
+      window.removeEventListener("mousemove", resize);
+      window.removeEventListener("mouseup", stopResizing);
+    };
+  }, [isResizing, resize, stopResizing]);
   
   // Legacy Tabs (Deprecated)
   const pluginTabs = registry.getSidebarTabs();
@@ -109,11 +139,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   return (
-    <aside className="sidebar-container" style={{ display: 'flex', width: '250px', borderRight: '1px solid #313244' }}>
+    <aside className="sidebar-container" style={{ display: 'flex', width: `${width}px`, borderRight: '1px solid #313244', position: 'relative' }}>
       {/* Activity Bar (Left Strip) */}
       <div className="activity-bar" style={{ width: '48px', background: '#11111b', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: '10px', borderRight: '1px solid #313244' }}>
         
-        <div 
+        <div
           className={`activity-icon ${activeTab === 'files' ? 'active' : ''}`} 
           onClick={() => setActiveTab('files')}
           title="Explorer"
@@ -163,6 +193,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="side-panel" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: '#181825' }}>
          {renderContent()}
       </div>
+
+      {/* Resize Handle */}
+      <div 
+        className={`sidebar-resizer ${isResizing ? 'active' : ''}`}
+        onMouseDown={startResizing}
+      />
     </aside>
   );
 };

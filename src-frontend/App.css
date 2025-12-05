@@ -90,6 +90,24 @@ body {
   overflow: hidden;
 }
 
+/* Sidebar Resizer */
+.sidebar-resizer {
+  width: 5px;
+  background: transparent;
+  cursor: col-resize;
+  position: absolute;
+  top: 0;
+  right: -2px; /* Overlap slightly */
+  bottom: 0;
+  z-index: 100;
+  transition: background 0.2s ease;
+}
+
+.sidebar-resizer:hover, .sidebar-resizer.active {
+  background: var(--accent);
+  opacity: 0.5;
+}
+
 /* Sidebar */
 .sidebar {
   width: 250px;
