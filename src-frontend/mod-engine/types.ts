@@ -185,7 +185,10 @@ export interface PluginManifest {
   version: string;
   main: string;
   permissions?: string[];
-  executionEnvironment?: 'main' | 'worker'; 
+  executionEnvironment?: 'main' | 'worker';
+  
+  // [NEW] If true, this plugin is required for all peers in the session
+  isUniversal?: boolean; 
 
   contributes?: {
     commands?: CommandContribution[];

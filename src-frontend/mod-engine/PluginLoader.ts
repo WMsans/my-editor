@@ -69,6 +69,23 @@ class PluginLoaderService {
   
   getAllManifests() { return this.allManifests; }
 
+  // [NEW] Get IDs of enabled plugins that are marked as 'isUniversal'
+  getEnabledUniversalPlugins(): string[] {
+      return this.allManifests
+          .filter(m => m.isUniversal && this.isPluginEnabled(m.id))
+          .map(m => m.id);
+  }
+
+  // [NEW] Check if the local environment satisfies the required plugin list
+  // Returns an array of missing plugin IDs (or empty if all good)
+  checkMissingRequirements(requiredIds: string[]): string[] {
+      return requiredIds.filter(reqId => {
+          const manifest = this.allManifests.find(m => m.id === reqId);
+          // Missing if not installed OR installed but disabled
+          return !manifest || !this.isPluginEnabled(reqId);
+      });
+  }
+
   async registerStaticContributions(manifests: PluginManifest[]) {
     for (const manifest of manifests) {
         if (this.isPluginEnabled(manifest.id)) {

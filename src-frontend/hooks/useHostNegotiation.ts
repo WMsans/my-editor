@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { pluginLoader } from "../mod-engine/PluginLoader";
 
 const META_FILE = ".collab_meta.json";
 const VALIDATION_TOKEN = "COLLAB_ACCESS_GRANTED_V1";
@@ -98,11 +99,15 @@ export function useHostNegotiation({
             }
         }
 
+        // [NEW] Get currently active universal plugins to enforce on guests
+        const requiredPlugins = pluginLoader.getEnabledUniversalPlugins();
+
         const metaObj = { 
             hostId: myPeerId, 
             hostAddrs: storedAddrs,
             encrypted: !!newKey,
-            securityCheck: securityCheck 
+            securityCheck: securityCheck,
+            requiredPlugins // [NEW] Save requirements
         };
 
         const content = new TextEncoder().encode(JSON.stringify(metaObj, null, 2));
@@ -151,6 +156,7 @@ export function useHostNegotiation({
             let metaAddrs: string[] = [];
             let isEncrypted = false;
             let securityCheck = "";
+            let requiredPlugins: string[] = []; // [NEW]
 
             try {
                 const contentBytes = await invoke<number[]>("read_file_content", { path: metaPath });
@@ -160,6 +166,7 @@ export function useHostNegotiation({
                 metaHost = json.hostId;
                 isEncrypted = json.encrypted || false;
                 securityCheck = json.securityCheck || "";
+                requiredPlugins = json.requiredPlugins || []; // [NEW] Read requirements
 
                 if (isEncrypted) {
                     let decrypted = false;
@@ -240,6 +247,14 @@ export function useHostNegotiation({
                         return;
                     }
 
+                    // [NEW] Validate Required Plugins
+                    const missing = pluginLoader.checkMissingRequirements(requiredPlugins);
+                    if (missing.length > 0) {
+                        setWarningMsg(`Cannot join session.\n\nMissing universally required plugins:\n- ${missing.join('\n- ')}\n\nPlease install/enable them and try again.`);
+                        setStatus("Missing Plugins");
+                        return;
+                    }
+
                     setStatus(`Found host ${metaHost.slice(0,8)}. Joining...`);
                     isAutoJoiningRef.current = true; 
                     sendJoinRequest(metaHost, metaAddrs || []);
@@ -263,11 +278,11 @@ export function useHostNegotiation({
             let storedCheck: any = securityCheck;
             const activeKey = encryptionKeyRef.current;
             const isSecure = !!activeKey;
+            const myUniversalPlugins = pluginLoader.getEnabledUniversalPlugins();
 
             if (isSecure) {
                 try {
                     storedAddrs = await encryptData(JSON.stringify(myAddresses), activeKey);
-                    // Ensure we write the security check too
                     storedCheck = await encryptData(VALIDATION_TOKEN, activeKey);
                 } catch (e) {
                     console.error("Encryption failed during save:", e);
@@ -279,7 +294,8 @@ export function useHostNegotiation({
                 hostId: myPeerId, 
                 hostAddrs: storedAddrs,
                 encrypted: isSecure,
-                securityCheck: storedCheck 
+                securityCheck: storedCheck,
+                requiredPlugins: myUniversalPlugins // [NEW] Write requirements
             };
 
             const content = new TextEncoder().encode(JSON.stringify(metaObj, null, 2));
