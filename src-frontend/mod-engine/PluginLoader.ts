@@ -19,12 +19,13 @@ class PluginLoaderService {
   private activePlugins: Map<string, ActivePlugin> = new Map();
   private workerClient: WorkerClient | null = null;
   private allManifests: PluginManifest[] = [];
-
-  // ... [Existing discoverPlugins, isPluginEnabled, setPluginEnabled methods remain unchanged] ...
   
   async discoverPlugins(pluginsRootPath: string): Promise<PluginManifest[]> {
     try {
+      // [NOTE] Ensure your Rust backend's "read_directory" command 
+      // allows access to the AppLocalData path.
       const entries = await invoke<FileEntry[]>("read_directory", { path: pluginsRootPath });
+      
       const manifests: PluginManifest[] = [];
 
       for (const entry of entries) {

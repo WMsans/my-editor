@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import * as Y from "yjs"; 
 import { invoke } from "@tauri-apps/api/core"; 
+import { appLocalDataDir, join } from '@tauri-apps/api/path';
 import { documentRegistry } from "./mod-engine/DocumentRegistry"; 
 
 // API & Registry
@@ -198,8 +199,18 @@ function App() {
         });
 
         // B. Discover Plugins
-        const pluginsDir = "../plugins"; 
+        // This gets the standard data dir:
+        // Windows: %localappdata%\com.yourapp\plugins
+        // Mac: ~/Library/Application Support/com.yourapp/plugins
+        // Linux: ~/.local/share/com.yourapp/plugins
+        const appDataPath = await appLocalDataDir();
+        const pluginsDir = await join(appDataPath, 'plugins');
+
+        // Optional: Create the directory if it doesn't exist 
+        // (You might need to add a check/create invoke here, or use the fs plugin)
+        console.log(`🔌 Scanning for plugins in: ${pluginsDir}`);
         
+        // 3. Discover & Load
         const manifests = await pluginLoader.discoverPlugins(pluginsDir);
         if (!isMounted) return; 
 
