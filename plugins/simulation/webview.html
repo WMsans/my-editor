@@ -77,7 +77,8 @@
                
                const newCode = attrs.code;
                // Update editor if content differs (prevents cursor jumping)
-               if (newCode !== undefined && editor.value !== newCode) {
+               // FIX: Check for null to avoid overwriting default code on initial load
+               if (newCode !== undefined && newCode !== null && editor.value !== newCode) {
                    editor.value = newCode;
                    // Optional: Run simulation immediately on load
                    // setTimeout(runSimulation, 100); 
