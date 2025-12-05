@@ -174,7 +174,7 @@ export interface HostAPI {
   };
   plugins: {
     getAll: () => Promise<PluginManifest[]>;
-    isEnabled: (id: string) => boolean;
+    isEnabled: (id: string) => Promise<boolean>; 
     setEnabled: (id: string, enabled: boolean) => void;
   };
 }

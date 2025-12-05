@@ -13,10 +13,11 @@ export function activate(context: HostAPI) {
   // 2. Helper to fetch and broadcast plugin list
   const broadcastPlugins = async () => {
       const plugins = await api.plugins.getAll();
-      const pluginData = plugins.map((p: any) => ({
+      
+      const pluginData = await Promise.all(plugins.map(async (p: any) => ({
           ...p,
-          enabled: api.plugins.isEnabled(p.id)
-      }));
+          enabled: await api.plugins.isEnabled(p.id)
+      })));
 
       // Emit event that the webview (via host bridge) can listen to
       api.events.emit("plugin-manager:data", pluginData);

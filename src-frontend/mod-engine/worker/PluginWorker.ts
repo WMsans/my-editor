@@ -199,7 +199,7 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
         },
         plugins: {
              getAll: () => callMain('plugins', 'getAll') as Promise<any>,
-             isEnabled: () => true, // Sync check difficult in worker
+             isEnabled: (id) => callMain('plugins', 'isEnabled', id) as Promise<boolean>,
              setEnabled: (id, val) => callMain('plugins', 'setEnabled', id, val)
         }
     };

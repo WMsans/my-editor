@@ -132,7 +132,7 @@ export const createHostAPI = (
     },
     plugins: {
         getAll: async () => pluginManager ? pluginManager.getAll() : [],
-        isEnabled: (id) => pluginManager ? pluginManager.isEnabled(id) : true,
+        isEnabled: async (id) => pluginManager ? pluginManager.isEnabled(id) : true,
         setEnabled: (id, val) => pluginManager?.setEnabled(id, val)
     }
   };
