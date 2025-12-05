@@ -1,4 +1,4 @@
-import { Mod, SidebarTab, HostAPI, PluginManifest, ViewContainerContribution, ViewContribution, RegisteredTopbarItem, Disposable } from "./types";
+import { Mod, SidebarTab, HostAPI, PluginManifest, ViewContainerContribution, ViewContribution, RegisteredTopbarItem, Disposable, WebviewViewOptions } from "./types";
 
 interface SlashCommandDef {
     id: string; 
@@ -29,6 +29,9 @@ class Registry {
   // [PHASE 1] Static Contributions
   private viewContainers: RegisteredViewContainer[] = [];
   private views: Map<string, RegisteredView[]> = new Map();
+  
+  // [NEW] Webview Providers
+  private webviewViews: Map<string, WebviewViewOptions> = new Map();
 
   // Command Handlers
   private commandHandlers = new Map<string, (args?: any) => void>();
@@ -54,6 +57,7 @@ class Registry {
     // Clear Static
     this.viewContainers = [];
     this.views.clear();
+    this.webviewViews.clear(); 
     this.notify();
 
     // Clear events
@@ -238,6 +242,15 @@ class Registry {
   }
 
   getTopbarItems() { return this.topbarItems; }
+
+  registerWebviewView(viewId: string, options: WebviewViewOptions) {
+      this.webviewViews.set(viewId, options);
+      this.notify();
+  }
+
+  getWebviewView(viewId: string) {
+      return this.webviewViews.get(viewId);
+  }
 }
 
 export const registry = new Registry();

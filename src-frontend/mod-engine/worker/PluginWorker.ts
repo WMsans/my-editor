@@ -1,5 +1,5 @@
-import { WorkerMessage, MainMessage, ApiRequestPayload, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, TopbarItemEventPayload, EventPayload, RegisterWebviewBlockPayload, ApplyEditPayload } from "./messages";
-import { HostAPI, TreeDataProvider, TreeItem, TopbarItemOptions } from "../types";
+import { WorkerMessage, MainMessage, ApiRequestPayload, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, TopbarItemEventPayload, EventPayload, RegisterWebviewBlockPayload, ApplyEditPayload, RegisterWebviewViewPayload } from "./messages";
+import { HostAPI, TreeDataProvider, TreeItem, TopbarItemOptions, WebviewViewOptions } from "../types";
 
 // --- State ---
 const commandHandlers = new Map<string, Function>();
@@ -81,6 +81,23 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
                     reveal: async (element, options) => {
                         // Not implemented in Phase 2
                     }
+                };
+            },
+            registerWebviewView: (viewId, options) => {
+                const payload: RegisterWebviewViewPayload = {
+                    viewId,
+                    options,
+                    pluginId
+                };
+                // We use a specific message type instead of generic API request for complex payloads
+                self.postMessage({
+                    type: 'REGISTER_WEBVIEW_VIEW',
+                    payload
+                });
+
+                return {
+                    update: () => {},
+                    dispose: () => {}
                 };
             },
             // [NEW] Topbar API

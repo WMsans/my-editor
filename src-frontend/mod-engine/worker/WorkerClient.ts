@@ -1,5 +1,5 @@
 import { HostAPI } from "../types";
-import { MainMessage, WorkerMessage, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, EventPayload, RegisterWebviewBlockPayload, ApplyEditPayload } from "./messages";
+import { MainMessage, WorkerMessage, ApiResponsePayload, TreeViewRequestPayload, TreeViewResponsePayload, RegisterTopbarItemPayload, UpdateTopbarItemPayload, EventPayload, RegisterWebviewBlockPayload, ApplyEditPayload, RegisterWebviewViewPayload } from "./messages";
 import { registry } from "../Registry";
 import { createWebviewBlockExtension } from "../../components/WebviewBlock.tsx";
 
@@ -83,6 +83,13 @@ export class WorkerClient {
                 const extension = createWebviewBlockExtension({ id, ...options, pluginId });
                 registry.registerExtension(extension);
                 console.log(`[WorkerClient] Registered Webview Block: ${id}`);
+                break;
+            }
+
+            case 'REGISTER_WEBVIEW_VIEW': {
+                const { viewId, options, pluginId } = payload as RegisterWebviewViewPayload;
+                registry.registerWebviewView(viewId, { ...options, pluginId });
+                console.log(`[WorkerClient] Registered Webview View: ${viewId}`);
                 break;
             }
 

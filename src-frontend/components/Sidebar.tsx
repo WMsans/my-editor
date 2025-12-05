@@ -2,7 +2,8 @@ import React, { useState } from "react";
 import { FileExplorer } from "./FileExplorer";
 import { IncomingRequest } from "./IncomingRequest";
 import { registry } from "../mod-engine/Registry";
-import { ExtensionSidebarView } from "./ExtensionSidebarView"; // [NEW]
+import { ExtensionSidebarView } from "./ExtensionSidebarView"; 
+import { SidebarWebview } from "./SidebarWebview"; 
 
 interface SidebarProps {
   rootPath: string;
@@ -72,19 +73,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (container) {
         const views = registry.getViews(container.id);
         return (
-            <div className="plugin-panel">
+            <div className="plugin-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
                 <div className="sidebar-header">{container.title.toUpperCase()}</div>
                 
                 {views.length === 0 && <div className="sidebar-empty">No views registered.</div>}
                 
-                {views.map(view => (
-                    // The Factory: We pass the ID, it fetches the data.
-                    <ExtensionSidebarView 
-                        key={view.id} 
-                        viewId={view.id} 
-                        name={view.name} 
-                    />
-                ))}
+                {views.map(view => {
+                    // Check if this is a webview
+                    if (view.type === 'webview') {
+                         const options = registry.getWebviewView(view.id);
+                         if (!options) return <div key={view.id} className="sidebar-empty">Loading {view.name}...</div>;
+                         return (
+                             <SidebarWebview 
+                                 key={view.id}
+                                 viewId={view.id}
+                                 options={options}
+                             />
+                         );
+                    }
+                    
+                    // Default to Tree View
+                    return (
+                        <ExtensionSidebarView 
+                            key={view.id} 
+                            viewId={view.id} 
+                            name={view.name} 
+                        />
+                    );
+                })}
             </div>
         );
     }

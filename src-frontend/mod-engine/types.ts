@@ -79,6 +79,20 @@ export interface RegisteredTopbarItem extends TopbarItemOptions {
     pluginId: string;
 }
 
+export interface WebviewViewOptions {
+    title?: string;
+    initialHtml?: string;
+    initialScript?: string;
+    entryPoint?: string;
+    pluginId?: string; // Injected automatically
+}
+
+export interface WebviewView {
+    update(html: string): void;
+    dispose(): void;
+}
+
+
 // --- Contribution Types ---
 
 export interface SidebarTab {
@@ -103,7 +117,7 @@ export interface ViewContainerContribution {
 export interface ViewContribution {
     id: string;
     name: string;
-    type?: string; 
+    type?: 'tree' | 'webview'; 
 }
 
 export interface Disposable {
@@ -120,6 +134,7 @@ export interface HostAPI {
   // [PHASE 2] Window / UI API (Data Driven)
   window: {
       createTreeView: <T>(viewId: string, options: TreeViewOptions<T>) => TreeView<T>;
+      registerWebviewView: (viewId: string, options: WebviewViewOptions) => WebviewView;
       createTopbarItem: (options: TopbarItemOptions) => TopbarItemControl;
       showInformationMessage: (message: string, ...items: string[]) => Promise<string | undefined>;
   };

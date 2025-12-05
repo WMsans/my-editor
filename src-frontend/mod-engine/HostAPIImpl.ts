@@ -1,4 +1,4 @@
-import { HostAPI, PluginManifest, TreeViewOptions, TreeView, TopbarItemOptions, TopbarItemControl } from "./types";
+import { HostAPI, PluginManifest, TreeViewOptions, TreeView, TopbarItemOptions, TopbarItemControl, WebviewViewOptions, WebviewView } from "./types";
 import { Editor } from "@tiptap/react";
 import { registry } from "./Registry";
 import { invoke } from "@tauri-apps/api/core";
@@ -44,6 +44,14 @@ export const createHostAPI = (
             console.log(`[Main] Reveal requested for ${viewId}`, element);
           }
         };
+      },
+      registerWebviewView: (viewId: string, options: WebviewViewOptions): WebviewView => {
+          registry.registerWebviewView(viewId, options);
+          console.log(`[Main] Webview View registered: ${viewId}`);
+          return {
+              update: (html) => console.log("Update not implemented for static registration"),
+              dispose: () => console.log("Dispose not implemented")
+          };
       },
       // [NEW] Local implementation (for local plugins)
       createTopbarItem: (options: TopbarItemOptions): TopbarItemControl => {
@@ -135,6 +143,12 @@ export const createScopedAPI = (baseApi: HostAPI, pluginId: string, permissions:
 
   return {
     ...baseApi,
+    window: {
+        ...baseApi.window,
+        registerWebviewView: (viewId, options) => {
+            return baseApi.window.registerWebviewView(viewId, { ...options, pluginId });
+        }
+    },
     editor: {
         ...baseApi.editor,
         registerWebviewBlock: (id, options) => {

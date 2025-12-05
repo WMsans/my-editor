@@ -1,5 +1,5 @@
 export interface WorkerMessage {
-    type: 'LOAD' | 'EXEC_COMMAND' | 'API_RESPONSE' | 'DEACTIVATE' | 'TREE_VIEW_REQUEST' | 'TOPBAR_ITEM_EVENT' | 'EVENT' | 'REGISTER_WEBVIEW_BLOCK' | 'APPLY_EDIT'; 
+    type: 'LOAD' | 'EXEC_COMMAND' | 'API_RESPONSE' | 'DEACTIVATE' | 'TREE_VIEW_REQUEST' | 'TOPBAR_ITEM_EVENT' | 'EVENT' | 'REGISTER_WEBVIEW_BLOCK' | 'REGISTER_WEBVIEW_VIEW' | 'APPLY_EDIT'; 
     payload: any;
 }
 
@@ -80,6 +80,17 @@ export interface RegisterWebviewBlockPayload {
         initialScript?: string;
         entryPoint?: string;
         attributes?: Record<string, any>;
+    };
+    pluginId: string;
+}
+
+export interface RegisterWebviewViewPayload {
+    viewId: string;
+    options: {
+        title?: string;
+        initialHtml?: string;
+        initialScript?: string;
+        entryPoint?: string;
     };
     pluginId: string;
 }

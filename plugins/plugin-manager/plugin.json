@@ -1,7 +1,7 @@
 {
   "id": "plugin-manager",
   "name": "Plugin Manager",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Manage installed plugins.",
   "author": "System",
   "main": "index.tsx",
@@ -24,7 +24,8 @@
       "plugin-manager-bar": [
         {
           "id": "plugin-list",
-          "name": "Installed Plugins"
+          "name": "Installed Plugins",
+          "type": "webview"
         }
       ]
     }
