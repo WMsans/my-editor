@@ -2,6 +2,9 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog"; 
 import { documentRegistry } from "../mod-engine/DocumentRegistry";
+import { pluginLoader } from "../mod-engine/PluginLoader";
+
+const META_FILE = ".collab_meta.json";
 
 export function useProject(setWarningMsg: (msg: string | null) => void) {
   // State
@@ -74,6 +77,24 @@ export function useProject(setWarningMsg: (msg: string | null) => void) {
       });
 
       if (selected && typeof selected === 'string') {
+        // [CHECK] Validate Plugins before opening
+        const sep = selected.includes("\\") ? "\\" : "/";
+        const metaPath = `${selected}${sep}${META_FILE}`;
+        try {
+            const contentBytes = await invoke<number[]>("read_file_content", { path: metaPath });
+            const content = new TextDecoder().decode(new Uint8Array(contentBytes));
+            const json = JSON.parse(content);
+            if (json.requiredPlugins && Array.isArray(json.requiredPlugins)) {
+                const missing = pluginLoader.checkMissingRequirements(json.requiredPlugins);
+                if (missing.length > 0) {
+                     setWarningMsg(`Cannot open project.\n\nMissing universally required plugins:\n- ${missing.join('\n- ')}\n\nPlease install/enable them and try again.`);
+                     return;
+                }
+            }
+        } catch (e) {
+            // Ignore (Meta file likely missing, which is fine)
+        }
+
         setRootPath(selected);
         setFileSystemRefresh(prev => prev + 1);
         setDetectedRemote("");
@@ -114,6 +135,25 @@ export function useProject(setWarningMsg: (msg: string | null) => void) {
     if (destPath) {
       try {
         await invoke("save_incoming_project", { destPath, data });
+
+        // [CHECK] Validate Plugins after receiving
+        const sep = destPath.includes("\\") ? "\\" : "/";
+        const metaPath = `${destPath}${sep}${META_FILE}`;
+        try {
+            const contentBytes = await invoke<number[]>("read_file_content", { path: metaPath });
+            const content = new TextDecoder().decode(new Uint8Array(contentBytes));
+            const json = JSON.parse(content);
+            if (json.requiredPlugins && Array.isArray(json.requiredPlugins)) {
+                const missing = pluginLoader.checkMissingRequirements(json.requiredPlugins);
+                if (missing.length > 0) {
+                     setWarningMsg(`Project saved to ${destPath}, but cannot be opened.\n\nMissing universally required plugins:\n- ${missing.join('\n- ')}\n\nPlease install/enable them and try again.`);
+                     return;
+                }
+            }
+        } catch (e) {
+            // Ignore
+        }
+
         setRootPath(destPath);
         setFileSystemRefresh(prev => prev + 1);
         setDetectedRemote("");

@@ -273,6 +273,15 @@ export function useHostNegotiation({
                  setStatus("Updating host addresses...");
             }
 
+            if (requiredPlugins.length > 0) {
+                 const missing = pluginLoader.checkMissingRequirements(requiredPlugins);
+                 if (missing.length > 0) {
+                      setWarningMsg(`Cannot open/claim project.\n\nMissing universally required plugins:\n- ${missing.join('\n- ')}\n\nPlease install/enable them and try again.`);
+                      setStatus("Missing Plugins");
+                      return;
+                 }
+            }
+
             // WRITE LOGIC
             let storedAddrs: any = myAddresses;
             let storedCheck: any = securityCheck;
