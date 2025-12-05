@@ -193,6 +193,10 @@ function App() {
           }
         });
 
+        registry.registerCommand("window.reload", () => {
+             window.location.reload();
+        });
+
         // B. Discover Plugins
         const pluginsDir = "../plugins"; 
         

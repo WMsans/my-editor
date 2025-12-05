@@ -189,8 +189,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       </div>
 
-      {/* Side Panel Content */}
-      <div className="side-panel" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: '#181825' }}>
+      {/* Side Panel Content - FIX: pointerEvents: none during resize */}
+      <div className="side-panel" style={{ 
+          flex: 1, 
+          overflow: 'hidden', 
+          display: 'flex', 
+          flexDirection: 'column', 
+          background: '#181825',
+          pointerEvents: isResizing ? 'none' : 'auto' 
+      }}>
          {renderContent()}
       </div>
 

@@ -56,6 +56,24 @@
         .search-box:focus {
             border-color: var(--accent);
         }
+        
+        .reload-btn {
+            background-color: var(--surface);
+            color: var(--accent);
+            border: 1px solid var(--accent);
+            padding: 8px;
+            width: 100%;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-bottom: 10px;
+            transition: all 0.2s;
+        }
+        
+        .reload-btn:hover {
+            background-color: var(--accent);
+            color: var(--bg);
+        }
 
         .plugin-list {
             flex: 1;
@@ -173,6 +191,7 @@
 
 <div class="container">
     <div class="header">
+        <button id="reload-btn" class="reload-btn">↻ Reload Plugins</button>
         <input type="text" id="search" class="search-box" placeholder="Search plugins...">
     </div>
     <div id="list" class="plugin-list">
@@ -183,6 +202,7 @@
 <script>
     const list = document.getElementById('list');
     const searchInput = document.getElementById('search');
+    const reloadBtn = document.getElementById('reload-btn');
     let plugins = [];
 
     // --- Render Logic ---
@@ -242,6 +262,14 @@
             args: { id, enabled: currentEnabled }
         }, '*');
     }
+    
+    // --- Reload ---
+    reloadBtn.addEventListener('click', () => {
+        window.parent.postMessage({
+            command: 'executeCommand',
+            id: 'window.reload'
+        }, '*');
+    });
 
     // --- Search ---
     searchInput.addEventListener('input', (e) => {
