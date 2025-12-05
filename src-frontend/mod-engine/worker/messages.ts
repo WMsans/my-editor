@@ -76,8 +76,9 @@ export interface EventPayload {
 export interface RegisterWebviewBlockPayload {
     id: string;
     options: {
-        initialHtml: string;
+        initialHtml?: string;
         initialScript?: string;
+        entryPoint?: string;
         attributes?: Record<string, any>;
     };
     pluginId: string;

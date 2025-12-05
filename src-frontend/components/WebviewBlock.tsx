@@ -4,13 +4,15 @@ import { ReactNodeViewRenderer, NodeViewWrapper } from "@tiptap/react";
 
 interface WebviewBlockOptions {
   id: string;
-  initialHtml: string;
+  initialHtml?: string;
   initialScript?: string;
+  entryPoint?: string;
+  pluginId?: string;
   attributes?: Record<string, any>;
 }
 
 const WebviewBlockComponent = (props: any) => {
-  const { initialHtml, initialScript } = props.extension.options.webviewOptions;
+  const { initialHtml, initialScript, entryPoint, pluginId } = props.extension.options.webviewOptions;
   const iframeRef = useRef<HTMLIFrameElement>(null);
   
   // Serialize attributes to pass to the iframe
@@ -18,8 +20,16 @@ const WebviewBlockComponent = (props: any) => {
 
   useEffect(() => {
     const iframe = iframeRef.current;
-    if (iframe) {
-      // Construct the document to be loaded in the iframe
+    if (!iframe) return;
+
+    // Mode 1: Local File (Protocol Scheme)
+    if (entryPoint && pluginId) {
+        // Construct the custom protocol URL
+        // Backend must handle "plugin://<pluginId>/<entryPoint>"
+        iframe.src = `plugin://${pluginId}/${entryPoint}`;
+    } 
+    // Mode 2: Legacy Inline HTML
+    else if (initialHtml) {
       const docContent = `
         <!DOCTYPE html>
         <html>
@@ -73,8 +83,10 @@ const WebviewBlockComponent = (props: any) => {
     <NodeViewWrapper className="webview-block" style={{ border: '1px solid #45475a', borderRadius: '6px', overflow: 'hidden', background: '#181825' }}>
       <iframe 
         ref={iframeRef}
-        style={{ width: '100%', height: '250px', border: 'none' }} 
+        style={{ width: '100%', height: '400px', border: 'none' }} 
         title="Webview Block"
+        // Allow scripts, forms, and same-origin (needed for custom protocol to fetch relative assets)
+        sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
       />
     </NodeViewWrapper>
   );

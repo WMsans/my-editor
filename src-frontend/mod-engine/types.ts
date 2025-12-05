@@ -126,7 +126,13 @@ export interface HostAPI {
   
   editor: {
     registerExtension: (ext: Node | Extension, options?: { priority?: 'high' | 'normal' }) => void;
-    registerWebviewBlock: (id: string, options: { initialHtml: string; initialScript?: string; attributes?: Record<string, any> }) => void;
+    registerWebviewBlock: (id: string, options: { 
+      initialHtml?: string; 
+      initialScript?: string; 
+      entryPoint?: string; 
+      attributes?: Record<string, any>;
+      pluginId?: string; 
+    }) => void;
     insertContent: (content: any) => void;
     insertContentAt: (range: { from: number; to: number }, content: any) => void; 
     getCommands: () => any; 

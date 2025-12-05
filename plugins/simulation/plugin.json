@@ -1,5 +1,5 @@
 {
-  "id": "simulation-block",
+  "id": "simulation",
   "name": "Simulation Container",
   "version": "0.2.0",
   "description": "A Turing-complete JavaScript sandbox for the editor (Worker Mode).",

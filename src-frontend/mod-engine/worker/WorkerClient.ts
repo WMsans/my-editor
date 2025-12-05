@@ -79,8 +79,8 @@ export class WorkerClient {
                 break;
             
             case 'REGISTER_WEBVIEW_BLOCK': {
-                const { id, options } = payload as RegisterWebviewBlockPayload;
-                const extension = createWebviewBlockExtension({ id, ...options });
+                const { id, options, pluginId } = payload as RegisterWebviewBlockPayload;
+                const extension = createWebviewBlockExtension({ id, ...options, pluginId });
                 registry.registerExtension(extension);
                 console.log(`[WorkerClient] Registered Webview Block: ${id}`);
                 break;

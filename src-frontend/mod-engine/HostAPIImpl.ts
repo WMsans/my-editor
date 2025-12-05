@@ -69,6 +69,8 @@ export const createHostAPI = (
         console.log(`Extension registered (Priority: ${priority})`);
       },
       registerWebviewBlock: (id, options) => {
+         // Note: If called directly via 'baseApi' (not scoped), pluginId might be missing.
+         // This is fine for internal tools, but plugins should use scoped API.
          const ext = createWebviewBlockExtension({ id, ...options });
          registry.registerExtension(ext);
          console.log(`[Main] Registered Webview Block: ${id}`);
@@ -133,6 +135,14 @@ export const createScopedAPI = (baseApi: HostAPI, pluginId: string, permissions:
 
   return {
     ...baseApi,
+    editor: {
+        ...baseApi.editor,
+        registerWebviewBlock: (id, options) => {
+            // Automatically attach the pluginId to the webview options
+            // This enables the "plugin://<id>/" scheme in the frontend component
+            baseApi.editor.registerWebviewBlock(id, { ...options, pluginId });
+        }
+    },
     data: {
       ...baseApi.data,
       fs: {
