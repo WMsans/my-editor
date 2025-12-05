@@ -194,10 +194,14 @@ const WebpageNode = Node.create({
 
 export function activate(context: any) {
   context.editor.registerExtension(WebpageNode);
-  context.commands.registerCommand("webpage.insert", () => {
+  context.commands.registerCommand("webpage.insert", (args: any) => {
     const editor = context.editor.getSafeInstance();
     if (editor) {
-      editor.chain().focus().insertContent({ type: 'webpageBlock' }).run();
+      if (args && args.range) {
+          editor.chain().focus().insertContentAt(args.range, { type: 'webpageBlock' }).run();
+      } else {
+          editor.chain().focus().insertContent({ type: 'webpageBlock' }).run();
+      }
     }
   });
 }

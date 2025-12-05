@@ -6,10 +6,8 @@ import { WorkerClient } from "./worker/WorkerClient";
 import { createScopedAPI } from "./HostAPIImpl";
 
 import * as React from "react";
-import * as ReactDOM from "react-dom";
 import * as TiptapReact from "@tiptap/react";
 import * as TiptapCore from "@tiptap/core";
-import * as PMState from "@tiptap/pm/state";
 
 interface FileEntry {
   name: string;
@@ -20,8 +18,10 @@ interface FileEntry {
 class PluginLoaderService {
   private activePlugins: Map<string, ActivePlugin> = new Map();
   private workerClient: WorkerClient | null = null;
-  private allManifests: PluginManifest[] = []; // [NEW] Store all discovered plugins
+  private allManifests: PluginManifest[] = [];
 
+  // ... [Existing discoverPlugins, isPluginEnabled, setPluginEnabled methods remain unchanged] ...
+  
   async discoverPlugins(pluginsRootPath: string): Promise<PluginManifest[]> {
     try {
       const entries = await invoke<FileEntry[]>("read_directory", { path: pluginsRootPath });
@@ -43,7 +43,7 @@ class PluginLoaderService {
           }
         }
       }
-      this.allManifests = manifests; // [NEW] Save for listing later
+      this.allManifests = manifests;
       return manifests;
     } catch (e) {
       console.error("Failed to scan plugins directory:", e);
@@ -51,13 +51,11 @@ class PluginLoaderService {
     }
   }
 
-  // [NEW] Helper to check persistent storage
   isPluginEnabled(id: string): boolean {
     const disabled = JSON.parse(localStorage.getItem("disabled_plugins") || "[]");
     return !disabled.includes(id);
   }
 
-  // [NEW] Helper to set persistent storage
   setPluginEnabled(id: string, enabled: boolean) {
     let disabled = JSON.parse(localStorage.getItem("disabled_plugins") || "[]");
     if (enabled) {
@@ -70,20 +68,40 @@ class PluginLoaderService {
   
   getAllManifests() { return this.allManifests; }
 
+  async registerStaticContributions(manifests: PluginManifest[]) {
+    for (const manifest of manifests) {
+        if (this.isPluginEnabled(manifest.id)) {
+            registry.registerManifest(manifest);
+        }
+    }
+  }
+
   async loadPlugins(api: HostAPI, manifests: PluginManifest[]) {
-    // Initialize Worker Client if needed
     if (!this.workerClient) {
         this.workerClient = new WorkerClient(api);
     }
 
     for (const manifest of manifests) {
-      // [NEW] Skip disabled plugins
       if (!this.isPluginEnabled(manifest.id)) {
           console.log(`⏸️ Plugin '${manifest.id}' is disabled.`);
           continue;
       }
       await this.loadSinglePlugin(api, manifest);
     }
+  }
+
+  // --- [PHASE 3] Data Bridge for UI ---
+
+  public async requestTreeViewData(viewId: string, element?: any) {
+    if (!this.workerClient) return [];
+    // 'getChildren' returns the raw data objects
+    return this.workerClient.requestTreeData(viewId, 'getChildren', element);
+  }
+
+  // [NEW] Resolve the UI representation (label, icon) for a data element
+  public async resolveTreeItem(viewId: string, element: any) {
+    if (!this.workerClient) return {};
+    return this.workerClient.requestTreeData(viewId, 'getTreeItem', element);
   }
 
   private async loadSinglePlugin(api: HostAPI, manifest: PluginManifest) {
@@ -109,25 +127,9 @@ class PluginLoaderService {
       }
 
       if (manifest.executionEnvironment === 'worker') {
-         // --- WORKER MODE ---
          console.log(`🚀 Loading ${manifest.name} in Worker...`);
-         
-         // In worker mode, we don't pass the main API. The worker client handles bridging.
          this.workerClient?.loadPlugin(manifest.id, code, manifest);
          
-         // Register Slash Commands (Manifest only)
-         // The Worker will register the handler via RPC "REGISTER_COMMAND_PROXY"
-         if (manifest.contributes?.slashMenu) {
-            manifest.contributes.slashMenu.forEach(item => {
-                registry.registerSlashCommand({
-                    id: manifest.id,
-                    command: item.command,
-                    title: item.title,
-                    description: item.description
-                });
-            });
-         }
-
          this.activePlugins.set(manifest.id, {
              manifest,
              instance: { 
@@ -137,47 +139,28 @@ class PluginLoaderService {
              }
          });
       }
-      else{
+      else {
+        // [FIX] Main thread logic: Expose React and Tiptap to the synthetic 'require'
         const exports: any = {};
         const module = { exports };
         
         const syntheticRequire = (modName: string) => {
           switch (modName) {
             case "react": return React;
-            case "react-dom": return ReactDOM;
             case "@tiptap/react": return TiptapReact;
             case "@tiptap/core": return TiptapCore;
-            case "@tiptap/pm/state": return PMState;
-            default: throw new Error(`Plugin ${manifest.id} requested unknown module ${modName}`);
+            default:
+              throw new Error(`Module '${modName}' is not available. Use the Host API.`);
           }
         };
 
-        const runPlugin = new Function("exports", "require", "module", "React", code);
-        runPlugin(exports, syntheticRequire, module, React);
+        const runPlugin = new Function("exports", "require", "module", "code", code);
+        runPlugin(exports, syntheticRequire, module, code);
 
         if (exports.activate && typeof exports.activate === 'function') {
-          // [NEW] Create scoped API based on manifest permissions
           const scopedApi = createScopedAPI(api, manifest.id, manifest.permissions || []);
-          
-          // Pass scoped API instead of global API
           exports.activate(scopedApi);
-          
-          if (manifest.contributes?.slashMenu) {
-              manifest.contributes.slashMenu.forEach(item => {
-                  registry.registerSlashCommand({
-                      id: manifest.id,
-                      command: item.command,
-                      title: item.title,
-                      description: item.description
-                  });
-              });
-          }
-
-          this.activePlugins.set(manifest.id, {
-            manifest,
-            instance: exports,
-          });
-          console.log(`✅ Plugin Activated: ${manifest.name}`);
+          this.activePlugins.set(manifest.id, { manifest, instance: exports });
         }
       }
     } catch (e) {

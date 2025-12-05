@@ -203,10 +203,14 @@ const ImageNode = Node.create({
 export function activate(context: any) {
   context.editor.registerExtension(ImageNode);
 
-  context.commands.registerCommand("image.insert", () => {
+  context.commands.registerCommand("image.insert", (args: any) => {
     const editor = context.editor.getSafeInstance();
     if (editor) {
-      editor.chain().focus().insertContent({ type: 'imageBlock' }).run();
+      if (args && args.range) {
+          editor.chain().focus().insertContentAt(args.range, { type: 'imageBlock' }).run();
+      } else {
+          editor.chain().focus().insertContent({ type: 'imageBlock' }).run();
+      }
     }
   });
 }

@@ -1,8 +1,9 @@
-import { HostAPI, PluginManifest } from "./types";
+import { HostAPI, PluginManifest, TreeViewOptions, TreeView, TopbarItemOptions, TopbarItemControl, WebviewViewOptions, WebviewView } from "./types";
 import { Editor } from "@tiptap/react";
 import { registry } from "./Registry";
 import { invoke } from "@tauri-apps/api/core";
 import * as Y from "yjs";
+import { createWebviewBlockExtension } from "../components/WebviewBlock";
 
 interface PluginManager {
   getAll: () => Promise<PluginManifest[]>;
@@ -27,6 +28,45 @@ export const createHostAPI = (
   };
 
   return {
+    // [PHASE 4] Event Bus
+    events: {
+        emit: (event, data) => registry.emit(event, data),
+        on: (event, handler) => registry.on(event, handler)
+    },
+
+    // [PHASE 2] Window API Implementation
+    window: {
+      createTreeView: <T>(viewId: string, options: TreeViewOptions<T>): TreeView<T> => {
+        console.log(`[Main] TreeView registered: ${viewId}`);
+        return {
+          dispose: () => console.log(`[Main] TreeView disposed: ${viewId}`),
+          reveal: async (element, options) => {
+            console.log(`[Main] Reveal requested for ${viewId}`, element);
+          }
+        };
+      },
+      registerWebviewView: (viewId: string, options: WebviewViewOptions): WebviewView => {
+          registry.registerWebviewView(viewId, options);
+          console.log(`[Main] Webview View registered: ${viewId}`);
+          return {
+              update: (html) => console.log("Update not implemented for static registration"),
+              dispose: () => console.log("Dispose not implemented")
+          };
+      },
+      // [NEW] Local implementation (for local plugins)
+      createTopbarItem: (options: TopbarItemOptions): TopbarItemControl => {
+         registry.registerTopbarItem({ ...options, pluginId: 'host-local' });
+         return {
+             update: (opt) => registry.updateTopbarItem(options.id, opt),
+             dispose: () => registry.removeTopbarItem(options.id)
+         };
+      },
+      showInformationMessage: async (message: string, ...items: string[]) => {
+        setWarningMsg(message);
+        return undefined;
+      }
+    },
+
     editor: {
       getSafeInstance: () => getEditor(),
       getCommands: () => getEditor()?.commands || null,
@@ -35,6 +75,19 @@ export const createHostAPI = (
         const priority = options?.priority || 'normal';
         registry.registerExtension(ext, priority);
         console.log(`Extension registered (Priority: ${priority})`);
+      },
+      registerWebviewBlock: (id, options) => {
+         // Note: If called directly via 'baseApi' (not scoped), pluginId might be missing.
+         // This is fine for internal tools, but plugins should use scoped API.
+         const ext = createWebviewBlockExtension({ id, ...options });
+         registry.registerExtension(ext);
+         console.log(`[Main] Registered Webview Block: ${id}`);
+      },
+      insertContent: (content) => {
+        getEditor()?.chain().focus().insertContent(content).run();
+      },
+      insertContentAt: (range, content) => {
+        getEditor()?.chain().focus().insertContentAt(range, content).run();
       }
     },
     ui: {
@@ -69,9 +122,7 @@ export const createHostAPI = (
           return await invoke<number[]>("read_file_content", { path: resolvePath(path) });
         },
         writeFile: async (path: string, content: number[]) => {
-          // 1. Write locally
           await invoke("write_file_content", { path: resolvePath(path), content });
-          // 2. Broadcast to peers so they also have the file [FIX]
           await invoke("broadcast_update", { path, data: content });
         },
         createDirectory: async (path: string) => {
@@ -79,10 +130,9 @@ export const createHostAPI = (
         }
       }
     },
-    // [NEW] Plugin Management
     plugins: {
         getAll: async () => pluginManager ? pluginManager.getAll() : [],
-        isEnabled: (id) => pluginManager ? pluginManager.isEnabled(id) : true,
+        isEnabled: async (id) => pluginManager ? pluginManager.isEnabled(id) : true,
         setEnabled: (id, val) => pluginManager?.setEnabled(id, val)
     }
   };
@@ -93,9 +143,22 @@ export const createScopedAPI = (baseApi: HostAPI, pluginId: string, permissions:
 
   return {
     ...baseApi,
+    window: {
+        ...baseApi.window,
+        registerWebviewView: (viewId, options) => {
+            return baseApi.window.registerWebviewView(viewId, { ...options, pluginId });
+        }
+    },
+    editor: {
+        ...baseApi.editor,
+        registerWebviewBlock: (id, options) => {
+            // Automatically attach the pluginId to the webview options
+            // This enables the "plugin://<id>/" scheme in the frontend component
+            baseApi.editor.registerWebviewBlock(id, { ...options, pluginId });
+        }
+    },
     data: {
       ...baseApi.data,
-      // Wrap File System calls with permission check
       fs: {
         readFile: async (path: string) => {
           if (!hasPermission("filesystem")) {

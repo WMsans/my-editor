@@ -19,7 +19,81 @@ export interface Mod {
   component?: React.FC<BlockProps>;
 }
 
-// --- NEW Plugin API Types ---
+// --- NEW Plugin API Types (Phase 2) ---
+
+export interface TreeItem {
+  id?: string;
+  label: string;
+  collapsibleState?: 'none' | 'collapsed' | 'expanded';
+  icon?: string; // emoji or identifier
+  description?: string;
+  tooltip?: string;
+  contextValue?: string;
+  command?: {
+      command: string;
+      title: string;
+      arguments?: any[];
+  };
+}
+
+export interface TreeDataProvider<T = any> {
+    getChildren(element?: T): Promise<T[]>;
+    getTreeItem(element: T): Promise<TreeItem> | TreeItem;
+}
+
+export interface TreeViewOptions<T> {
+    treeDataProvider: TreeDataProvider<T>;
+}
+
+export interface TreeView<T> {
+    dispose(): void;
+    reveal(element: T, options?: { select?: boolean; focus?: boolean; expand?: boolean | number }): Promise<void>;
+}
+
+// --- Top Bar / Toolbar Types ---
+
+export type TopbarItemType = 'button' | 'text' | 'dropdown';
+
+export interface TopbarItemOptions {
+    id: string; 
+    type: TopbarItemType;
+    label?: string;       // Button text or Label for input
+    value?: string;       // Initial value for input/text
+    placeholder?: string; // For inputs
+    options?: string[];   // For dropdowns
+    width?: string;       // CSS width (e.g. "100px")
+    tooltip?: string;
+    icon?: string;
+    disabled?: boolean;   // [NEW] Support for disabled state
+    onClick?: () => void;
+    onChange?: (value: string) => void;
+}
+
+export interface TopbarItemControl {
+    update(options: Partial<TopbarItemOptions>): void;
+    dispose(): void;
+}
+
+// Internal representation in Registry
+export interface RegisteredTopbarItem extends TopbarItemOptions {
+    pluginId: string;
+}
+
+export interface WebviewViewOptions {
+    title?: string;
+    initialHtml?: string;
+    initialScript?: string;
+    entryPoint?: string;
+    pluginId?: string; // Injected automatically
+}
+
+export interface WebviewView {
+    update(html: string): void;
+    dispose(): void;
+}
+
+
+// --- Contribution Types ---
 
 export interface SidebarTab {
   id: string;
@@ -28,14 +102,60 @@ export interface SidebarTab {
   component: React.FC<any>;
 }
 
+export interface CommandContribution {
+    command: string;
+    title: string;
+    category?: string;
+}
+
+export interface ViewContainerContribution {
+    id: string;
+    title: string;
+    icon: string;
+}
+
+export interface ViewContribution {
+    id: string;
+    name: string;
+    type?: 'tree' | 'webview'; 
+}
+
+export interface Disposable {
+    dispose(): void;
+}
+
 export interface HostAPI {
+  // [PHASE 4] Event Bus
+  events: {
+      emit: (event: string, data?: any) => void;
+      on: (event: string, handler: (data: any) => void) => Disposable;
+  };
+
+  // [PHASE 2] Window / UI API (Data Driven)
+  window: {
+      createTreeView: <T>(viewId: string, options: TreeViewOptions<T>) => TreeView<T>;
+      registerWebviewView: (viewId: string, options: WebviewViewOptions) => WebviewView;
+      createTopbarItem: (options: TopbarItemOptions) => TopbarItemControl;
+      showInformationMessage: (message: string, ...items: string[]) => Promise<string | undefined>;
+  };
+  
   editor: {
     registerExtension: (ext: Node | Extension, options?: { priority?: 'high' | 'normal' }) => void;
+    registerWebviewBlock: (id: string, options: { 
+      initialHtml?: string; 
+      initialScript?: string; 
+      entryPoint?: string; 
+      attributes?: Record<string, any>;
+      pluginId?: string; 
+    }) => void;
+    insertContent: (content: any) => void;
+    insertContentAt: (range: { from: number; to: number }, content: any) => void; 
     getCommands: () => any; 
     getState: () => EditorState | null;
     getSafeInstance: () => Editor | null;
   };
   ui: {
+    // Deprecated in favor of window.createTreeView for new plugins
     registerSidebarTab: (tab: SidebarTab) => void;
     showNotification: (msg: string) => void;
   };
@@ -52,10 +172,9 @@ export interface HostAPI {
       createDirectory: (path: string) => Promise<void>; 
     }
   };
-  // [NEW] Plugin Management API
   plugins: {
     getAll: () => Promise<PluginManifest[]>;
-    isEnabled: (id: string) => boolean;
+    isEnabled: (id: string) => Promise<boolean>; 
     setEnabled: (id: string, enabled: boolean) => void;
   };
 }
@@ -66,16 +185,16 @@ export interface PluginManifest {
   version: string;
   main: string;
   permissions?: string[];
-  
-  /**
-   * Defines where the plugin runs.
-   * - 'main': Runs in UI thread (Access to React/Tiptap). Risks freezing UI.
-   * - 'worker': Runs in background Worker. Safe, but limited UI access.
-   * @default 'main'
-   */
   executionEnvironment?: 'main' | 'worker'; 
 
   contributes?: {
+    commands?: CommandContribution[];
+    viewsContainers?: {
+      activitybar?: ViewContainerContribution[];
+    };
+    views?: {
+      [containerId: string]: ViewContribution[];
+    };
     slashMenu?: Array<{ command: string; title: string; description: string }>;
   };
 }

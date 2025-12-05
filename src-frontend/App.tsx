@@ -62,6 +62,13 @@ function App() {
     getRelativePath
   } = useProject(setWarningMsg);
 
+  // --- EVENT: Emit file:open ---
+  useEffect(() => {
+    if (currentFilePath) {
+      registry.emit('file:open', { path: currentFilePath });
+    }
+  }, [currentFilePath]);
+
   // --- P2P Callbacks ---
   const handleHostDisconnect = useCallback((hostId: string) => {
       deadHostIdRef.current = hostId;
@@ -180,13 +187,30 @@ function App() {
         // Clear registry before loading
         registry.init(api);
 
-        // B. Discover & Load Plugins
+        registry.registerCommand("file.open", (path: string) => {
+          if (typeof path === 'string') {
+              setCurrentFilePath(path);
+          }
+        });
+
+        registry.registerCommand("window.reload", () => {
+             window.location.reload();
+        });
+
+        // B. Discover Plugins
         const pluginsDir = "../plugins"; 
         
         const manifests = await pluginLoader.discoverPlugins(pluginsDir);
         if (!isMounted) return; 
 
+        // [CHANGED] Phase 1: Register Static Contributions first
+        // This populates UI icons/commands without running JS
+        await pluginLoader.registerStaticContributions(manifests);
+
+        // [OPTIONAL] We still load JS for now to maintain functionality
+        // but the architecture now supports static-only init.
         await pluginLoader.loadPlugins(api, manifests);
+        
         if (!isMounted) return; 
 
         // C. Ready
@@ -211,6 +235,7 @@ function App() {
   const onNewFileClick = () => {
     handleNewFile();
     editor?.commands.clearContent();
+    registry.emit('file:new');
   };
 
   const handleSave = async () => {
@@ -227,6 +252,7 @@ function App() {
             const relPath = getRelativePath(currentFilePath);
             if (relPath) {
                 await documentRegistry.manualSave(relPath);
+                registry.emit('file:save', { path: currentFilePath });
             }
         } else {
             const name = prompt("Enter file name (e.g., page.md):");
@@ -240,6 +266,7 @@ function App() {
             });
             setFileSystemRefresh(prev => prev + 1);
             setCurrentFilePath(newPath);
+            registry.emit('file:save', { path: newPath });
         }
     } catch (e: any) {
         setWarningMsg(`Failed to save file: ${e.toString()}`);
