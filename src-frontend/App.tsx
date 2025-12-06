@@ -1,140 +1,75 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import * as Y from "yjs"; 
 import { invoke } from "@tauri-apps/api/core"; 
-import { appLocalDataDir, join } from '@tauri-apps/api/path';
-import { documentRegistry } from "./mod-engine/DocumentRegistry"; 
 
-// API & Registry
+// Engine & Stores
 import { registry } from "./mod-engine/Registry";
-import { createHostAPI } from "./mod-engine/HostAPIImpl";
-import { pluginLoader } from "./mod-engine/PluginLoader";
-
-// Stores & Hooks
+import { documentRegistry } from "./mod-engine/DocumentRegistry"; 
 import { useProjectStore } from "./stores/useProjectStore";
 import { useP2PStore } from "./stores/useP2PStore";
 import { useUIStore } from "./stores/useUIStore";
+
+// Hooks
 import { useP2P } from "./hooks/useP2P";
 import { useHostNegotiation } from "./hooks/useHostNegotiation";
 import { useAppLifecycle } from "./hooks/useAppLifecycle";
 import { useProject } from "./hooks/useProject";
 import { useEditorManager } from "./hooks/useEditorManager";
+import { useAppBootstrap } from "./hooks/useAppBootstrap";
 
-// Components
-import { MenuBar } from "./components/MenuBar";
-import { Settings } from "./components/Settings";
-import { WarningModal } from "./components/WarningModal";
-import { PasswordModal } from "./components/PasswordModal";
-import { Sidebar } from "./components/Sidebar";
-import { EditorArea } from "./components/EditorArea";
+// Layout & Components
+import { MainLayout } from "./components/MainLayout";
+import { GlobalModalManager } from "./components/GlobalModalManager";
 import "./App.css";
 
 function App() {
-  // Store Access
+  // --- 1. Store Access ---
   const { rootPath, currentFilePath, setCurrentFilePath, triggerFileSystemRefresh } = useProjectStore();
   const { isHost, isJoining, isSyncing, setIsSyncing } = useP2PStore();
   const { setWarningMsg } = useUIStore();
 
-  // Lifecycle State
-  const [isAppReady, setIsAppReady] = useState(false);
-  const [loadError, setLoadError] = useState<string|null>(null);
-
-  // --- Logic Hooks (Controllers) ---
-  const {
-    isAutoJoining,
-    handleOpenFolder,
-    handleNewFile,
-    handleProjectReceived,
-    getRelativePath,
-    refreshRemoteOrigin
+  // --- 2. Logic Controllers ---
+  const { 
+      handleOpenFolder, handleNewFile, handleProjectReceived, 
+      getRelativePath, isAutoJoining 
   } = useProject();
 
-  // P2P Controller
-  const setIsSyncingRef = useRef<(v: boolean) => void>(() => {});
+  // P2P: Glue logic for syncing state
   const currentFilePathRef = useRef(currentFilePath);
   useEffect(() => { currentFilePathRef.current = currentFilePath; }, [currentFilePath]);
+  
+  const setIsSyncingRef = useRef<(v: boolean) => void>(() => {});
+  useEffect(() => { setIsSyncingRef.current = setIsSyncing; }, [setIsSyncing]);
 
   const handleFileSync = useCallback((syncedPath: string) => {
       const currentRel = getRelativePath(currentFilePathRef.current);
-      if (currentRel === syncedPath) {
-          setIsSyncingRef.current(false);
-      }
+      if (currentRel === syncedPath) setIsSyncingRef.current(false);
   }, [getRelativePath]);
 
   const { sendJoinRequest, requestSync } = useP2P(handleProjectReceived, handleFileSync);
-  
-  // Host Negotiation Controller
-  const { updateProjectKey } = useHostNegotiation(isAutoJoining, sendJoinRequest);
 
-  // App Lifecycle Controller
+  // Negotiation & Lifecycle
+  useHostNegotiation(isAutoJoining, sendJoinRequest);
   const { pendingQuit, isPushing, handleQuit, handleForceQuit } = useAppLifecycle();
 
   // Editor Manager
   const { editor, currentDoc } = useEditorManager(
-    rootPath,
-    currentFilePath,
-    getRelativePath,
-    isHost,
-    isJoining,
-    requestSync
+    rootPath, currentFilePath, getRelativePath, isHost, isJoining, requestSync
   );
-
-  // --- Global Event Links ---
-  useEffect(() => {
-    if (currentFilePath) {
-      registry.emit('file:open', { path: currentFilePath });
-    }
-  }, [currentFilePath]);
-
-  useEffect(() => { setIsSyncingRef.current = setIsSyncing; }, [setIsSyncing]);
-
-  // --- Initialization ---
+  
+  // Keep a ref of the editor for the HostAPI (accessed in bootstrap)
   const editorRef = useRef(editor);
   useEffect(() => { editorRef.current = editor; }, [editor]);
 
+  // --- 3. Bootstrap Engine ---
+  const { isAppReady, loadError } = useAppBootstrap(editorRef);
+
+  // --- 4. Global Event Listeners ---
   useEffect(() => {
-    let isMounted = true; 
-    const initEngine = async () => {
-      try {
-        if (!isMounted) return;
-        const api = createHostAPI(
-          () => editorRef.current, 
-          () => useProjectStore.getState().rootPath,
-          setWarningMsg,
-          {
-            getAll: async () => pluginLoader.getAllManifests(),
-            isEnabled: (id) => pluginLoader.isPluginEnabled(id),
-            setEnabled: (id, val) => pluginLoader.setPluginEnabled(id, val)
-          }
-        );
-        // @ts-ignore
-        window.CollabAPI = api;
-        
-        registry.init(api);
-        registry.registerCommand("file.open", (path: string) => {
-          if (typeof path === 'string') setCurrentFilePath(path);
-        });
-        registry.registerCommand("window.reload", () => window.location.reload());
+    if (currentFilePath) registry.emit('file:open', { path: currentFilePath });
+  }, [currentFilePath]);
 
-        const appDataPath = await appLocalDataDir();
-        const pluginsDir = await join(appDataPath, 'plugins');
-        console.log(`🔌 Scanning for plugins in: ${pluginsDir}`);
-        
-        const manifests = await pluginLoader.discoverPlugins(pluginsDir);
-        if (!isMounted) return; 
-
-        await pluginLoader.registerStaticContributions(manifests);
-        await pluginLoader.loadPlugins(api, manifests);
-        
-        if (isMounted) setIsAppReady(true);
-      } catch (e: any) {
-        if (isMounted) setLoadError(e.toString());
-      }
-    };
-    initEngine();
-    return () => { isMounted = false; pluginLoader.deactivateAll(); };
-  }, [setCurrentFilePath, setWarningMsg]);
-
-  // --- Action Handlers ---
+  // --- 5. Handlers ---
   const onNewFileClick = () => {
     handleNewFile();
     editor?.commands.clearContent();
@@ -184,32 +119,23 @@ function App() {
   }
 
   return (
-    <div className="app-layout">
-      <MenuBar 
-        onNew={onNewFileClick}
-        onOpenFolder={handleOpenFolder}
-        onQuit={handleQuit}
-        onSave={handleSave}
+    <>
+      <GlobalModalManager 
+        pendingQuit={pendingQuit} 
+        onForceQuit={handleForceQuit} 
       />
       
-      <Settings />
-      <PasswordModal />
-
-      <WarningModal 
-        onConfirm={pendingQuit ? handleForceQuit : undefined}
-        confirmText="Quit Anyway"
+      <MainLayout 
+        editor={editor}
+        isJoining={isJoining}
+        isPushing={isPushing}
+        isSyncing={isSyncing}
+        onNewFile={onNewFileClick}
+        onOpenFolder={handleOpenFolder}
+        onSave={handleSave}
+        onQuit={handleQuit}
       />
-
-      <div className="main-workspace">
-        <Sidebar />
-        <EditorArea 
-          editor={editor}
-          isJoining={isJoining}
-          isPushing={isPushing}
-          isSyncing={isSyncing}
-        />
-      </div>
-    </div>
+    </>
   );
 }
 
