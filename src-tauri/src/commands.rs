@@ -11,7 +11,6 @@ use std::process::Command;
 
 type SenderState<'a> = State<'a, Arc<Mutex<tokio::sync::mpsc::Sender<(String, Payload)>>>>;
 
-// ... [Keep FileEntry struct and visit_dirs function unchanged] ...
 #[derive(Serialize, Clone)]
 pub struct FileEntry {
     name: String,
@@ -66,6 +65,13 @@ pub fn git_pull(path: String, ssh_key_path: String) -> Result<String, String> {
         cmd.env("GIT_SSH_COMMAND", ssh_cmd);
     }
     cmd.env("GIT_TERMINAL_PROMPT", "0");
+    
+    // [FIX] Prevent git from spawning GUI prompts (askpass) which can crash the Tauri app
+    // due to X11/Wayland connection conflicts in the subprocess.
+    cmd.env("SSH_ASKPASS", "false");
+    cmd.env("GIT_ASKPASS", "false");
+    #[cfg(target_os = "linux")]
+    cmd.env_remove("DISPLAY"); // Ensure subprocess cannot touch the display
 
     let output = cmd.output().map_err(|e| format!("Git pull failed: {}", e))?;
 
@@ -79,7 +85,7 @@ pub fn git_pull(path: String, ssh_key_path: String) -> Result<String, String> {
 #[command]
 pub async fn request_join(
     peer_id: String, 
-    remote_addrs: Vec<String>, // CHANGED: Accept list of addresses
+    remote_addrs: Vec<String>, 
     sender: SenderState<'_> 
 ) -> Result<(), String> {
     let tx = sender.lock().await;
@@ -105,7 +111,6 @@ pub async fn approve_join(
     tx.send(("accept".to_string(), Payload::JoinAccept { peer_id, content })).await.map_err(|e| e.to_string())
 }
 
-// ... [Keep rest of the file unchanged] ...
 #[command]
 pub fn save_incoming_project(dest_path: String, data: Vec<u8>) -> Result<(), String> {
     let files: Vec<FileSyncEntry> = serde_json::from_slice(&data).map_err(|e| format!("Invalid project data: {}", e))?;
@@ -243,6 +248,13 @@ pub fn push_changes(path: String, ssh_key_path: String) -> Result<String, String
     let mut commit_cmd = Command::new("git");
     commit_cmd.current_dir(&path);
     commit_cmd.args(&["commit", "-m", "Auto-sync"]);
+    
+    commit_cmd.env("GIT_TERMINAL_PROMPT", "0");
+    commit_cmd.env("SSH_ASKPASS", "false");
+    commit_cmd.env("GIT_ASKPASS", "false");
+    #[cfg(target_os = "linux")]
+    commit_cmd.env_remove("DISPLAY");
+
     let _ = commit_cmd.output();
 
     let mut cmd = Command::new("git");
@@ -258,6 +270,11 @@ pub fn push_changes(path: String, ssh_key_path: String) -> Result<String, String
     }
 
     cmd.env("GIT_TERMINAL_PROMPT", "0");
+    // [FIX] Ensure no GUI side effects
+    cmd.env("SSH_ASKPASS", "false");
+    cmd.env("GIT_ASKPASS", "false");
+    #[cfg(target_os = "linux")]
+    cmd.env_remove("DISPLAY");
 
     let output = cmd.output().map_err(|e| format!("Git command failed: {}", e))?;
 

@@ -79,8 +79,6 @@ export function useProject() {
             }
         } catch (e) { /* Ignore */ }
 
-        setRootPath(selected);
-        triggerFileSystemRefresh();
         setDetectedRemote("");
         try {
           await fsService.initGitRepo(selected);
@@ -89,6 +87,9 @@ export function useProject() {
         } catch (e) {
           console.log("Git status:", e);
         }
+
+        setRootPath(selected);
+        triggerFileSystemRefresh();
       }
     } catch (e) {
       setWarningMsg("Folder open error: " + e);
