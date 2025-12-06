@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { pluginLoader } from "../mod-engine/PluginLoader";
@@ -10,6 +10,9 @@ export function useAppLifecycle() {
   const [pendingQuit, setPendingQuit] = useState(false);
   const [isPushing, setIsPushing] = useState(false);
   const setWarningMsg = useUIStore(s => s.setWarningMsg);
+  
+  // Use a ref to track the quit status immediately, avoiding stale closures in the event listener
+  const pendingQuitRef = useRef(false);
 
   useEffect(() => {
     const win = getCurrentWindow();
@@ -18,8 +21,9 @@ export function useAppLifecycle() {
       const { rootPath, sshKeyPath } = useProjectStore.getState();
       const { isHost, connectedPeers } = useP2PStore.getState();
 
-      // If a project is open and we haven't already prepared to quit...
-      if (rootPath && !pendingQuit) {
+      // Check the ref instead of the state variable
+      // If pendingQuitRef.current is true, we skip this block and allow the window to close.
+      if (rootPath && !pendingQuitRef.current) {
         event.preventDefault(); 
         setIsPushing(true);
         try {
@@ -62,6 +66,8 @@ export function useAppLifecycle() {
              await Promise.race([pushPromise, timeoutPromise]);
           }
           
+          // Update the ref IMMEDIATELY before calling close()
+          pendingQuitRef.current = true;
           setPendingQuit(true);
           
           await win.close();
@@ -69,13 +75,12 @@ export function useAppLifecycle() {
           setIsPushing(false);
           // This will now trigger the WarningModal, allowing the user to "Quit Anyway"
           setWarningMsg(`Failed to push changes before quitting:\n\n${e.toString()}\n\nQuit anyway?`);
-          // We do not set pendingQuit here; we wait for user confirmation in the modal
         }
       } 
-      // If pendingQuit is true, we do nothing, effectively allowing the event to propagate and close the app.
+      // If pendingQuitRef is true, we do nothing, allowing the default close event to propagate.
     });
     return () => { unlisten.then(f => f()); };
-  }, [pendingQuit, setWarningMsg]);
+  }, [setWarningMsg]); // pendingQuit removed from dependencies as we rely on the Ref
 
   // Regular quit triggers the lifecycle check
   const handleQuit = async () => { const win = getCurrentWindow(); await win.close(); };
