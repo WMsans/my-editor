@@ -1,62 +1,49 @@
 import { useState, useEffect } from "react";
 import * as Y from "yjs";
-import { documentRegistry } from "../mod-engine/DocumentRegistry";
+import { workspaceManager } from "../services";
 import { useCollaborativeEditor } from "./useCollaborativeEditor";
 
 export function useEditorManager(
-  rootPath: string,
-  currentFilePath: string | null,
-  getRelativePath: (path: string | null) => string | null,
+  currentFilePath: string | null, // Used only to detect "No file" state in UI
   isHost: boolean,
-  isJoining: boolean,
-  requestSync: (path: string) => Promise<void>
+  isJoining: boolean
 ) {
+  // 1. Listen to WorkspaceManager for the Active Document
   const [currentDoc, setCurrentDoc] = useState<Y.Doc>(() => new Y.Doc());
-  const [isSyncing, setIsSyncing] = useState(false);
   
-  const relativeFilePath = getRelativePath(currentFilePath);
-  
-  // Initialize Editor
+  useEffect(() => {
+      // Initial load
+      const initial = workspaceManager.getCurrentDoc();
+      if (initial) setCurrentDoc(initial);
+      else setCurrentDoc(new Y.Doc()); // Fallback for detached
+
+      // Subscription
+      const handler = (doc: Y.Doc | null) => {
+          setCurrentDoc(doc || new Y.Doc());
+      };
+      
+      workspaceManager.on('doc-changed', handler);
+      return () => workspaceManager.off('doc-changed', handler);
+  }, []);
+
+  // 2. Initialize Editor with that Doc
   const { editor } = useCollaborativeEditor(currentDoc);
 
-  // Manage Editable State
+  // 3. Manage Editable State
   useEffect(() => {
     if (editor) {
       editor.setEditable(!isJoining);
     }
   }, [editor, isJoining]);
 
-  // Effect 1: Handle Document Loading (Separated from Syncing)
-  useEffect(() => {
-    if (relativeFilePath) {
-      const doc = documentRegistry.getOrCreateDoc(relativeFilePath);
-      setCurrentDoc(doc);
-    } else {
-      // For new/untitled files, create a fresh detached document
-      // This will only run when switching to a "new file" state
-      setCurrentDoc(new Y.Doc());
-    }
-  }, [relativeFilePath]); // Only depends on the file path, not syncing props
-
-  // Effect 2: Handle Syncing
-  useEffect(() => {
-    if (relativeFilePath) {
-      // If guest, request sync for this file
-      if (!isHost && requestSync) {
-        requestSync(relativeFilePath);
-        setIsSyncing(true);
-      } else {
-        setIsSyncing(false);
-      }
-    } else {
-      setIsSyncing(false);
-    }
-  }, [relativeFilePath, isHost, requestSync]);
+  // Syncing state is now handled internally by P2PService/WorkspaceManager events usually
+  // But for the specific "Syncing..." UI overlay, we can deduce it or listen to events.
+  // For now, we simplify:
+  const isSyncing = false; 
 
   return { 
     editor, 
     isSyncing, 
-    setIsSyncing,
     currentDoc 
   };
 }

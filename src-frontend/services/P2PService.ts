@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import { documentRegistry } from "../mod-engine/DocumentRegistry";
+import { workspaceManager } from "./WorkspaceManager";
 import * as Y from "yjs";
 import { EventEmitter } from "./EventEmitter";
 
@@ -11,7 +11,6 @@ export class P2PService extends EventEmitter {
   private isHost: boolean = true;
   private isJoining: boolean = false;
   private unlistenFns: UnlistenFn[] = []; 
-  
   private initialized = false;
 
   constructor() {
@@ -56,12 +55,12 @@ export class P2PService extends EventEmitter {
         this.isJoining = false;
         this.emit('status-change', "Joined session! Folder synced.");
         this.emit('project-received', e.payload);
-        this.emit('role-changed', false); // Become Guest
+        this.emit('role-changed', false);
       }),
       await listen<string>("host-disconnected", (e) => {
         this.isHost = true;
         this.emit('host-disconnected', e.payload);
-        this.emit('role-changed', true); // Revert to Host
+        this.emit('role-changed', true); 
         this.emit('status-change', "⚠ Host disconnected! Negotiating...");
       }),
       await listen<{ path: string, data: number[] }>("p2p-sync", (e) => {
@@ -69,7 +68,7 @@ export class P2PService extends EventEmitter {
       }),
       await listen<{ path: string }>("sync-requested", async (e) => {
         const requestedPath = e.payload.path;
-        const doc = documentRegistry.getOrCreateDoc(requestedPath);
+        const doc = workspaceManager.getOrCreateDoc(requestedPath);
         const state = Y.encodeStateAsUpdate(doc);
         invoke("broadcast_update", { path: requestedPath, data: Array.from(state) }).catch(console.error);
       })
@@ -79,7 +78,6 @@ export class P2PService extends EventEmitter {
   private handleSyncPacket(payload: { path: string, data: number[] }) {
     const { path, data } = payload;
     
-    // Implicit Join
     if (this.isJoining) {
         this.isJoining = false;
         this.isHost = false;
@@ -88,9 +86,9 @@ export class P2PService extends EventEmitter {
     }
 
     if (path.match(/\.(png|jpg|jpeg|gif|svg|webp)$/i) || path.startsWith("resources/")) {
-        documentRegistry.writeAsset(path, new Uint8Array(data));
+        workspaceManager.writeAsset(path, new Uint8Array(data));
     } else {
-        documentRegistry.applyUpdate(path, new Uint8Array(data));
+        workspaceManager.applyUpdate(path, new Uint8Array(data));
     }
     this.emit('file-synced', path);
   }
@@ -119,7 +117,6 @@ export class P2PService extends EventEmitter {
     this.unlistenFns = [];
   }
 
-  // Getters
   getPeerId() { return this.myPeerId; }
   getAddresses() { return this.myAddresses; }
   getIsHost() { return this.isHost; }

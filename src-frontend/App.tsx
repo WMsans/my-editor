@@ -2,9 +2,9 @@ import { useEffect, useRef, useCallback } from "react";
 import * as Y from "yjs"; 
 import { invoke } from "@tauri-apps/api/core"; 
 
-// Engine & Stores
+// Services & Stores
 import { registry } from "./mod-engine/Registry";
-import { documentRegistry } from "./mod-engine/DocumentRegistry"; 
+import { workspaceManager } from "./services"; // [CHANGED]
 import { useProjectStore } from "./stores/useProjectStore";
 import { useP2PStore } from "./stores/useP2PStore";
 import { useUIStore } from "./stores/useUIStore";
@@ -23,56 +23,47 @@ import { GlobalModalManager } from "./components/GlobalModalManager";
 import "./App.css";
 
 function App() {
-  // --- 1. Store Access ---
   const { rootPath, currentFilePath, setCurrentFilePath, triggerFileSystemRefresh } = useProjectStore();
   const { isHost, isJoining, isSyncing, setIsSyncing } = useP2PStore();
   const { setWarningMsg } = useUIStore();
 
-  // --- 2. Logic Controllers ---
   const { 
       handleOpenFolder, handleNewFile, handleProjectReceived, 
       getRelativePath, isAutoJoining 
   } = useProject();
 
-  // P2P: Glue logic for syncing state
-  const currentFilePathRef = useRef(currentFilePath);
-  useEffect(() => { currentFilePathRef.current = currentFilePath; }, [currentFilePath]);
-  
-  const setIsSyncingRef = useRef<(v: boolean) => void>(() => {});
-  useEffect(() => { setIsSyncingRef.current = setIsSyncing; }, [setIsSyncing]);
+  // --- 1. Workspace Coordination ---
+  // When current file changes in Store, tell Manager to open it
+  useEffect(() => {
+      const rel = getRelativePath(currentFilePath);
+      workspaceManager.openFile(rel);
+      if (currentFilePath) registry.emit('file:open', { path: currentFilePath });
+  }, [currentFilePath, rootPath]); // dependency on rootPath ensures re-calc
 
+  // --- 2. P2P & Sync ---
   const handleFileSync = useCallback((syncedPath: string) => {
-      const currentRel = getRelativePath(currentFilePathRef.current);
-      if (currentRel === syncedPath) setIsSyncingRef.current(false);
-  }, [getRelativePath]);
+      // UI update only
+      if (getRelativePath(currentFilePath) === syncedPath) setIsSyncing(false);
+  }, [currentFilePath, getRelativePath, setIsSyncing]);
 
   const { sendJoinRequest, requestSync } = useP2P(handleProjectReceived, handleFileSync);
-
+  
   // Negotiation & Lifecycle
   useHostNegotiation(isAutoJoining, sendJoinRequest);
   const { pendingQuit, isPushing, handleQuit, handleForceQuit } = useAppLifecycle();
 
-  // Editor Manager
-  const { editor, currentDoc } = useEditorManager(
-    rootPath, currentFilePath, getRelativePath, isHost, isJoining, requestSync
-  );
+  // --- 3. Editor Manager (View Controller) ---
+  const { editor, currentDoc } = useEditorManager(currentFilePath, isHost, isJoining);
   
-  // Keep a ref of the editor for the HostAPI (accessed in bootstrap)
+  // Keep a ref for HostAPI
   const editorRef = useRef(editor);
   useEffect(() => { editorRef.current = editor; }, [editor]);
 
-  // --- 3. Bootstrap Engine ---
   const { isAppReady, loadError } = useAppBootstrap(editorRef);
 
-  // --- 4. Global Event Listeners ---
-  useEffect(() => {
-    if (currentFilePath) registry.emit('file:open', { path: currentFilePath });
-  }, [currentFilePath]);
-
-  // --- 5. Handlers ---
+  // --- 4. Handlers ---
   const onNewFileClick = () => {
     handleNewFile();
-    editor?.commands.clearContent();
     registry.emit('file:new');
   };
 
@@ -87,12 +78,10 @@ function App() {
     }
     try {
         if (currentFilePath) {
-            const relPath = getRelativePath(currentFilePath);
-            if (relPath) {
-                await documentRegistry.manualSave(relPath);
-                registry.emit('file:save', { path: currentFilePath });
-            }
+            await workspaceManager.saveCurrentFile();
+            registry.emit('file:save', { path: currentFilePath });
         } else {
+            // New File Creation Logic (still largely UI driven for prompts)
             const name = prompt("Enter file name (e.g., page.md):");
             if (!name) return;
             const sep = rootPath.includes("\\") ? "\\" : "/";
@@ -120,11 +109,7 @@ function App() {
 
   return (
     <>
-      <GlobalModalManager 
-        pendingQuit={pendingQuit} 
-        onForceQuit={handleForceQuit} 
-      />
-      
+      <GlobalModalManager pendingQuit={pendingQuit} onForceQuit={handleForceQuit} />
       <MainLayout 
         editor={editor}
         isJoining={isJoining}

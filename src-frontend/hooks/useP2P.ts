@@ -1,7 +1,7 @@
 import { useEffect, useCallback } from "react";
 import { p2pService } from "../services";
 import { useP2PStore } from "../stores/useP2PStore";
-import { documentRegistry } from "../mod-engine/DocumentRegistry";
+import { workspaceManager } from "../services";
 
 export function useP2P(
   onProjectReceived: (data: number[]) => void,
@@ -15,16 +15,11 @@ export function useP2P(
 
   useEffect(() => {
     const currentPeerId = p2pService.getPeerId();
-    if (currentPeerId) {
-        setMyPeerId(currentPeerId);
-    }
+    if (currentPeerId) setMyPeerId(currentPeerId);
     
     const currentAddrs = p2pService.getAddresses();
-    if (currentAddrs.length > 0) {
-        setMyAddresses(currentAddrs);
-    }
+    if (currentAddrs.length > 0) setMyAddresses(currentAddrs);
 
-    // 2. Subscribe to Events
     const unsubs = [
       p2pService.on('identity-updated', (data: any) => {
         setMyPeerId(data.peerId);
@@ -48,9 +43,8 @@ export function useP2P(
     return () => unsubs.forEach(fn => fn());
   }, [onProjectReceived, onFileSync, setMyPeerId, setMyAddresses, setIncomingRequest, setStatus, setConnectedPeers, setIsHost, setIsJoining, setDeadHostId]);
 
-  // Sync Registry Host Status
   useEffect(() => {
-    documentRegistry.setIsHost(isHost);
+    workspaceManager.setIsHost(isHost);
   }, [isHost]);
 
   const sendJoinRequest = useCallback(async (peerId: string, remoteAddrs: string[] = []) => {
