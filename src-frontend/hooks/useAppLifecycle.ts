@@ -53,7 +53,13 @@ export function useAppLifecycle() {
                      console.error("Failed to wipe host ID:", e);
                  }
              }
-             await invoke("push_changes", { path: rootPath, sshKeyPath: sshKeyPath || "" });
+             
+             const pushPromise = invoke("push_changes", { path: rootPath, sshKeyPath: sshKeyPath || "" });
+             const timeoutPromise = new Promise((_, reject) => 
+                 setTimeout(() => reject(new Error("Push operation timed out (15s). Network may be slow or down.")), 15000)
+             );
+             
+             await Promise.race([pushPromise, timeoutPromise]);
           }
           
           setPendingQuit(true);
@@ -61,7 +67,8 @@ export function useAppLifecycle() {
           await win.close();
         } catch (e: any) {
           setIsPushing(false);
-          setWarningMsg(`Failed to push changes before quitting:\n\n${e}\n\nQuit anyway?`);
+          // This will now trigger the WarningModal, allowing the user to "Quit Anyway"
+          setWarningMsg(`Failed to push changes before quitting:\n\n${e.toString()}\n\nQuit anyway?`);
           // We do not set pendingQuit here; we wait for user confirmation in the modal
         }
       } 
