@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import { workspaceManager } from "./WorkspaceManager";
+import { WorkspaceManager } from "./WorkspaceManager";
 import * as Y from "yjs";
 import { EventEmitter } from "./EventEmitter";
 
@@ -12,9 +12,17 @@ export class P2PService extends EventEmitter {
   private isJoining: boolean = false;
   private unlistenFns: UnlistenFn[] = []; 
   private initialized = false;
+  
+  // Dependency Injection
+  private workspaceManager: WorkspaceManager | null = null;
 
   constructor() {
     super();
+  }
+
+  // Allow injecting the manager after instantiation to break cycles
+  injectWorkspaceManager(wm: WorkspaceManager) {
+    this.workspaceManager = wm;
   }
 
   async init() {
@@ -68,14 +76,21 @@ export class P2PService extends EventEmitter {
       }),
       await listen<{ path: string }>("sync-requested", async (e) => {
         const requestedPath = e.payload.path;
-        const doc = workspaceManager.getOrCreateDoc(requestedPath);
-        const state = Y.encodeStateAsUpdate(doc);
-        invoke("broadcast_update", { path: requestedPath, data: Array.from(state) }).catch(console.error);
+        if (this.workspaceManager) {
+            const doc = this.workspaceManager.getOrCreateDoc(requestedPath);
+            const state = Y.encodeStateAsUpdate(doc);
+            invoke("broadcast_update", { path: requestedPath, data: Array.from(state) }).catch(console.error);
+        }
       })
     );
   }
 
   private handleSyncPacket(payload: { path: string, data: number[] }) {
+    if (!this.workspaceManager) {
+        console.warn("P2PService received sync packet but WorkspaceManager is not injected.");
+        return;
+    }
+
     const { path, data } = payload;
     
     if (this.isJoining) {
@@ -85,10 +100,10 @@ export class P2PService extends EventEmitter {
         this.emit('status-change', "Joined session (Synced).");
     }
 
-    if (path.match(/\.(png|jpg|jpeg|gif|svg|webp)$/i) || path.startsWith("resources/")) {
-        workspaceManager.writeAsset(path, new Uint8Array(data));
+    if (path.match(/.(png|jpg|jpeg|gif|svg|webp)$/i) || path.startsWith("resources/")) {
+        this.workspaceManager.writeAsset(path, new Uint8Array(data));
     } else {
-        workspaceManager.applyUpdate(path, new Uint8Array(data));
+        this.workspaceManager.applyUpdate(path, new Uint8Array(data));
     }
     this.emit('file-synced', path);
   }

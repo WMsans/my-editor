@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { p2pService } from "../services";
 
 interface P2PState {
   isHost: boolean;
@@ -23,16 +22,15 @@ interface P2PState {
   setDeadHostId: (id: string | null) => void;
 }
 
-// Initialize with service defaults
 export const useP2PStore = create<P2PState>((set) => ({
-  isHost: p2pService.getIsHost(),
+  isHost: true, // Default safe state
   status: "Initializing...",
-  myPeerId: p2pService.getPeerId(),
+  myPeerId: null,
   connectedPeers: 0,
   incomingRequest: null,
   isJoining: false,
   isSyncing: false,
-  myAddresses: p2pService.getAddresses(),
+  myAddresses: [],
   deadHostId: null,
 
   setIsHost: (val) => set({ isHost: val }),

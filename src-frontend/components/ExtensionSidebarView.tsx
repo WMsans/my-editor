@@ -29,7 +29,7 @@ const GenericTreeItem: React.FC<{
         const resolved = await Promise.all(rawChildren.map(async (child: any) => {
             const ui = await pluginLoader.resolveTreeItem(viewId, child);
             // Merge raw data (for logic) with UI properties (for display)
-            return { ...child, ...ui };
+            return { ...child, ...(ui as any) };
         }));
         setChildren(resolved);
       }
@@ -115,7 +115,7 @@ export const ExtensionSidebarView: React.FC<ExtensionSidebarViewProps> = ({
                 // 2. Resolve UI properties
                 const resolved = await Promise.all(rawRoots.map(async (child: any) => {
                     const ui = await pluginLoader.resolveTreeItem(viewId, child);
-                    return { ...child, ...ui };
+                    return { ...child, ...(ui as any) };
                 }));
                 setRootItems(resolved);
             }

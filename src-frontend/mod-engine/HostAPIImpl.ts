@@ -77,10 +77,10 @@ export const createHostAPI = (
          registry.registerExtension(ext);
       },
       insertContent: (content: unknown) => {
-        getEditor()?.chain().focus().insertContent(content).run();
+        getEditor()?.chain().focus().insertContent(content as any).run();
       },
       insertContentAt: (range: { from: number; to: number }, content: unknown) => {
-        getEditor()?.chain().focus().insertContentAt(range, content).run();
+        getEditor()?.chain().focus().insertContentAt(range, content as any).run();
       }
     },
     ui: {
