@@ -10,10 +10,21 @@ export function useP2P(
   const {
     setIsHost, setStatus, setMyPeerId, setMyAddresses,
     setIncomingRequest, setConnectedPeers, setIsJoining,
-    incomingRequest, setDeadHostId
+    incomingRequest, setDeadHostId, isHost
   } = useP2PStore();
 
   useEffect(() => {
+    const currentPeerId = p2pService.getPeerId();
+    if (currentPeerId) {
+        setMyPeerId(currentPeerId);
+    }
+    
+    const currentAddrs = p2pService.getAddresses();
+    if (currentAddrs.length > 0) {
+        setMyAddresses(currentAddrs);
+    }
+
+    // 2. Subscribe to Events
     const unsubs = [
       p2pService.on('identity-updated', (data: any) => {
         setMyPeerId(data.peerId);
@@ -35,18 +46,12 @@ export function useP2P(
     ];
 
     return () => unsubs.forEach(fn => fn());
-  }, [onProjectReceived, onFileSync]);
+  }, [onProjectReceived, onFileSync, setMyPeerId, setMyAddresses, setIncomingRequest, setStatus, setConnectedPeers, setIsHost, setIsJoining, setDeadHostId]);
 
   // Sync Registry Host Status
   useEffect(() => {
-    // We subscribe to the store state here to keep Registry in sync
-    const unsub = useP2PStore.subscribe((state, prevState) => {
-        if (state.isHost !== prevState.isHost) {
-            documentRegistry.setIsHost(state.isHost);
-        }
-    });
-    return () => unsub();
-  }, []);
+    documentRegistry.setIsHost(isHost);
+  }, [isHost]);
 
   const sendJoinRequest = useCallback(async (peerId: string, remoteAddrs: string[] = []) => {
     setIsJoining(true);

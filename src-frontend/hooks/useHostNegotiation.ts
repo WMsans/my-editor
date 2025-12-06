@@ -12,9 +12,21 @@ export function useHostNegotiation(
   sendJoinRequest: (peerId: string, addrs: string[]) => void
 ) {
   // Access stores
-  const { rootPath, sshKeyPath, encryptionKey, setEncryptionKey } = useProjectStore();
-  const { myPeerId, myAddresses, isHost, deadHostId, setStatus, setDeadHostId } = useP2PStore();
-  const { setWarningMsg, requestPassword } = useUIStore();
+  // Using selectors prevents unnecessary re-renders, though full store access is also fine.
+  const rootPath = useProjectStore(s => s.rootPath);
+  const sshKeyPath = useProjectStore(s => s.sshKeyPath);
+  const encryptionKey = useProjectStore(s => s.encryptionKey);
+  const setEncryptionKey = useProjectStore(s => s.setEncryptionKey);
+
+  const myPeerId = useP2PStore(s => s.myPeerId);
+  const myAddresses = useP2PStore(s => s.myAddresses);
+  const isHost = useP2PStore(s => s.isHost);
+  const deadHostId = useP2PStore(s => s.deadHostId);
+  const setStatus = useP2PStore(s => s.setStatus);
+  const setDeadHostId = useP2PStore(s => s.setDeadHostId);
+
+  const setWarningMsg = useUIStore(s => s.setWarningMsg);
+  const requestPassword = useUIStore(s => s.requestPassword);
 
   const isNegotiatingRef = useRef(false);
 
@@ -58,7 +70,15 @@ export function useHostNegotiation(
   };
 
   useEffect(() => {
-    if (!rootPath || !myPeerId || !isHost) return;
+    // If essentials are missing, we can't negotiate.
+    if (!rootPath) return; 
+    
+    if (!myPeerId) {
+        setStatus("Initializing Network Identity...");
+        return;
+    }
+    
+    if (!isHost) return;
 
     const negotiateHost = async (retryCount = 0) => {
         if (retryCount === 0 && isNegotiatingRef.current) return;
@@ -113,6 +133,7 @@ export function useHostNegotiation(
                 }
             } catch (e) { /* Meta missing/invalid is fine */ }
 
+            // Logic: Join existing host or Claim host
             if (metaHost && metaHost !== myPeerId) {
                 if (deadHostId !== metaHost) {
                     if (!isHost) return; 
@@ -130,11 +151,13 @@ export function useHostNegotiation(
                 }
             }
 
+            // Claim Host
             if (metaHost === myPeerId && JSON.stringify(metaAddrs.sort()) === JSON.stringify(myAddresses.sort())) {
                  setStatus("I am the host (verified).");
                  return;
             }
 
+            // Write self as host
             let storedAddrs: any = myAddresses;
             let storedCheck: any = "";
             const activeKey = authService.getKey();
@@ -165,13 +188,14 @@ export function useHostNegotiation(
 
         } catch (e) {
             console.error("Negotiation error:", e);
+            setStatus("Negotiation error.");
         } finally {
             isNegotiatingRef.current = false;
         }
     };
 
     negotiateHost();
-  }, [rootPath, myPeerId, myAddresses, isHost, deadHostId]); // React to store changes
+  }, [rootPath, myPeerId, myAddresses, isHost, deadHostId, sshKeyPath]); // Added sshKeyPath to deps
 
   return { updateProjectKey };
 }
