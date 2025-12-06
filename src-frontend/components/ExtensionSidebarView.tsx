@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { pluginLoader } from "../mod-engine/PluginLoader";
-import { registry } from "../mod-engine/Registry";
+import { commandService } from "../mod-engine/services/CommandService";
 
 // --- The Recursive Node Component ---
 const GenericTreeItem: React.FC<{
@@ -52,7 +52,7 @@ const GenericTreeItem: React.FC<{
     }
     // Handle Command Click
     if (item.command) {
-      registry.executeCommand(item.command.command, item.command.arguments);
+      commandService.executeCommand(item.command.command, item.command.arguments);
     }
   };
 
