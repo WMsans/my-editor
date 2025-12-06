@@ -5,8 +5,7 @@ import { pluginLoader } from "../mod-engine/PluginLoader";
 import { fsService } from "../services";
 import { useProjectStore } from "../stores/useProjectStore";
 import { useUIStore } from "../stores/useUIStore";
-
-const META_FILE = ".collab_meta.json";
+import { FILES } from "../constants";
 
 export function useProject() {
   const { 
@@ -56,7 +55,7 @@ export function useProject() {
 
       if (selected && typeof selected === 'string') {
         try {
-            const content = await fsService.readFileString(`${selected}/${META_FILE}`);
+            const content = await fsService.readFileString(`${selected}/${FILES.METADATA}`);
             const json = JSON.parse(content);
             if (json.requiredPlugins) {
                 const missing = pluginLoader.checkMissingRequirements(json.requiredPlugins);

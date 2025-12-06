@@ -1,16 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
-import { HostAPI, PluginManifest, TreeDataProvider } from "./types";
+import { HostAPI, PluginManifest, DirectoryEntry, PluginModule, PluginExports, SyntheticRequire } from "./types";
 import { registry } from "./Registry";
 import { transform } from "sucrase"; 
 import { WorkerClient } from "./worker/WorkerClient";
 import { createScopedAPI } from "./HostAPIImpl";
 import { fsService } from "../services";
+import { FILES, CHANNELS } from "../constants";
 
 import * as React from "react";
 import * as TiptapReact from "@tiptap/react";
 import * as TiptapCore from "@tiptap/core";
 
-// --- [PHASE 4] Unified Plugin Controller Interface ---
+// --- Unified Plugin Controller Interface ---
 interface PluginController {
     id: string;
     manifest: PluginManifest;
@@ -18,22 +19,22 @@ interface PluginController {
     deactivate(): Promise<void>;
     
     // Data Capabilities
-    getTreeData(viewId: string, element?: any): Promise<any[]>;
-    getTreeItem(viewId: string, element: any): Promise<any>;
+    getTreeData(viewId: string, element?: unknown): Promise<unknown[]>;
+    getTreeItem(viewId: string, element: unknown): Promise<unknown>;
 }
 
 // Controller for Main-Thread Plugins
 class LocalPluginController implements PluginController {
-    public instance: any;
+    public instance: PluginExports = {};
     
     // In-memory storage for Main Thread Data Providers
-    private treeProviders = new Map<string, TreeDataProvider<any>>();
+    private treeProviders = new Map<string, any>();
 
     constructor(public id: string, public manifest: PluginManifest, private code: string) {}
 
     async activate(api: HostAPI) {
-        const exports: any = {};
-        const module = { exports };
+        const exports: PluginExports = {};
+        const module: PluginModule = { exports };
         
         // Intercept createTreeView to capture providers locally
         const interceptedApi = {
@@ -47,7 +48,7 @@ class LocalPluginController implements PluginController {
             }
         };
 
-        const syntheticRequire = (modName: string) => {
+        const syntheticRequire: SyntheticRequire = (modName: string) => {
           switch (modName) {
             case "react": return React;
             case "@tiptap/react": return TiptapReact;
@@ -59,7 +60,7 @@ class LocalPluginController implements PluginController {
         const runPlugin = new Function("exports", "require", "module", "code", this.code);
         runPlugin(exports, syntheticRequire, module, this.code);
 
-        this.instance = exports;
+        this.instance = module.exports || exports;
         if (this.instance.activate) {
             await this.instance.activate(interceptedApi);
         }
@@ -72,13 +73,13 @@ class LocalPluginController implements PluginController {
         this.treeProviders.clear();
     }
 
-    async getTreeData(viewId: string, element?: any): Promise<any[]> {
+    async getTreeData(viewId: string, element?: unknown): Promise<unknown[]> {
         const provider = this.treeProviders.get(viewId);
         if (provider) return await provider.getChildren(element);
         return [];
     }
 
-    async getTreeItem(viewId: string, element: any): Promise<any> {
+    async getTreeItem(viewId: string, element: unknown): Promise<unknown> {
         const provider = this.treeProviders.get(viewId);
         if (provider) return await provider.getTreeItem(element);
         return {};
@@ -102,11 +103,11 @@ class WorkerPluginController implements PluginController {
         this.workerClient.deactivatePlugin(this.id);
     }
 
-    async getTreeData(viewId: string, element?: any) {
+    async getTreeData(viewId: string, element?: unknown) {
         return this.workerClient.requestTreeData(viewId, 'getChildren', element);
     }
 
-    async getTreeItem(viewId: string, element: any) {
+    async getTreeItem(viewId: string, element: unknown) {
         return this.workerClient.requestTreeData(viewId, 'getTreeItem', element);
     }
 }
@@ -118,17 +119,18 @@ class PluginLoaderService {
   
   async discoverPlugins(pluginsRootPath: string): Promise<PluginManifest[]> {
     try {
-      const entries = await invoke<any[]>("read_directory", { path: pluginsRootPath });
+      const entries = await invoke<DirectoryEntry[]>(CHANNELS.READ_DIR, { path: pluginsRootPath });
       const manifests: PluginManifest[] = [];
 
       for (const entry of entries) {
         if (entry.is_dir) {
           const sep = entry.path.includes("\\") ? "\\" : "/";
-          const configPath = `${entry.path}${sep}plugin.json`;
+          const configPath = `${entry.path}${sep}${FILES.PLUGIN_CONFIG}`;
           
           try {
             const configStr = await fsService.readFileString(configPath);
             const manifest: PluginManifest = JSON.parse(configStr);
+            // Inject internal path
             (manifest as any)._rootPath = entry.path; 
             manifests.push(manifest);
           } catch (e) {
@@ -194,9 +196,9 @@ class PluginLoaderService {
     }
   }
 
-  // --- [PHASE 4] Unified Data Bridge ---
+  // --- Unified Data Bridge ---
 
-  public async requestTreeViewData(viewId: string, element?: any) {
+  public async requestTreeViewData(viewId: string, element?: unknown) {
     const pluginId = registry.getPluginIdForView(viewId);
     if (!pluginId) return [];
 
@@ -207,7 +209,7 @@ class PluginLoaderService {
     return [];
   }
 
-  public async resolveTreeItem(viewId: string, element: any) {
+  public async resolveTreeItem(viewId: string, element: unknown) {
     const pluginId = registry.getPluginIdForView(viewId);
     if (!pluginId) return {};
 
@@ -249,7 +251,7 @@ class PluginLoaderService {
              code, 
              this.workerClient
          );
-         await controller.activate(api); // api param ignored by worker impl but keeps interface consistent
+         await controller.activate(api);
       }
       else {
         controller = new LocalPluginController(manifest.id, manifest, code);

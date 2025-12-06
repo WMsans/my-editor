@@ -3,6 +3,7 @@ import { registry } from "../mod-engine/Registry";
 import { RegisteredTopbarItem } from "../mod-engine/types";
 import { useProjectStore } from "../stores/useProjectStore";
 import { useUIStore } from "../stores/useUIStore";
+import styles from "./MenuBar.module.css"; 
 
 interface MenuBarProps {
   onNew: () => void;
@@ -82,29 +83,29 @@ export const MenuBar: React.FC<MenuBarProps> = ({
   };
 
   return (
-    <div className="top-bar" onClick={(e) => e.stopPropagation()}>
-      <div className="menu-item">
+    <div className={styles.topBar} onClick={(e) => e.stopPropagation()}>
+      <div className={styles.menuItem}>
         <span onClick={() => toggleMenu("file")}>File</span>
         {activeMenu === "file" && (
-          <div className="dropdown">
-            <div onClick={() => { onNew(); setActiveMenu(null); }}>New File</div>
-            <div className="separator" />
-            <div onClick={() => { onOpenFolder(); setActiveMenu(null); }}>Open Folder...</div>
-            <div className="separator" />
-            <div onClick={() => { onSave(); setActiveMenu(null); }}>Save</div>
-            <div className="separator" />
-            <div onClick={() => { setShowSettings(true); setActiveMenu(null); }}>Settings</div>
-            <div className="separator" />
-            <div onClick={() => { onQuit(); setActiveMenu(null); }}>Quit</div>
+          <div className={styles.dropdown}>
+            <div className={styles.dropdownItem} onClick={() => { onNew(); setActiveMenu(null); }}>New File</div>
+            <div className={styles.separator} />
+            <div className={styles.dropdownItem} onClick={() => { onOpenFolder(); setActiveMenu(null); }}>Open Folder...</div>
+            <div className={styles.separator} />
+            <div className={styles.dropdownItem} onClick={() => { onSave(); setActiveMenu(null); }}>Save</div>
+            <div className={styles.separator} />
+            <div className={styles.dropdownItem} onClick={() => { setShowSettings(true); setActiveMenu(null); }}>Settings</div>
+            <div className={styles.separator} />
+            <div className={styles.dropdownItem} onClick={() => { onQuit(); setActiveMenu(null); }}>Quit</div>
           </div>
         )}
       </div>
       
-      <div className="plugin-toolbar" style={{ display: 'flex', alignItems: 'center', borderLeft: '1px solid #313244', paddingLeft: '10px', height: '100%' }}>
+      <div className={styles.pluginToolbar}>
           {extraItems.map(item => renderItem(item))}
       </div>
 
-      <div className="current-file-label">
+      <div className={styles.currentFileLabel}>
         {currentFilePath ? `Editing: ${currentFilePath}` : "Untitled (Unsaved)"}
       </div>
     </div>

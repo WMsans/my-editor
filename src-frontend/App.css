@@ -24,65 +24,6 @@ body {
   height: 100vh;
 }
 
-/* Top Bar */
-.top-bar {
-  height: 35px;
-  background-color: #11111b;
-  display: flex;
-  align-items: center;
-  padding: 0 1rem;
-  border-bottom: 1px solid var(--border);
-  user-select: none;
-  z-index: 1000;
-}
-
-.menu-item {
-  position: relative;
-  cursor: pointer;
-  margin-right: 1rem;
-  font-weight: 500;
-}
-
-.menu-item:hover {
-  color: #fff;
-}
-
-.dropdown {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  background: #313244;
-  border: 1px solid #11111b;
-  min-width: 150px;
-  z-index: 101;
-  border-radius: 4px;
-  padding: 5px 0;
-  box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-}
-
-.dropdown div {
-  padding: 5px 15px;
-  cursor: pointer;
-  color: #cdd6f4;
-}
-
-.dropdown div:hover {
-  background: #45475a;
-}
-
-.dropdown .separator {
-  height: 1px;
-  background: #585b70;
-  margin: 4px 0;
-  padding: 0;
-}
-
-.current-file-label {
-  margin-left: auto;
-  font-size: 0.8em;
-  color: #6c7086;
-}
-
 /* Main Workspace */
 .main-workspace {
   display: flex;
@@ -233,60 +174,7 @@ body {
   color: #1e1e2e;
 }
 
-/* Simulation Block & Slash Menu */
-.simulation-block {
-  border: 1px solid #45475a;
-  border-radius: 6px;
-  background: #181825;
-  margin: 1rem 0;
-  overflow: hidden;
-}
-
-.block-header {
-  background: #313244;
-  padding: 5px 10px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 0.8rem;
-  color: #a6adc8;
-}
-
-.simulation-content {
-  display: flex;
-  height: 200px;
-}
-
-.simulation-content textarea {
-  flex: 1;
-  background: #11111b;
-  color: #a6e3a1;
-  border: none;
-  padding: 10px;
-  font-family: monospace;
-  resize: none;
-}
-
-.canvas-wrapper {
-  flex: 1;
-  background: #000;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  position: relative;
-}
-
-.error-log {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: rgba(255, 0, 0, 0.8);
-  color: white;
-  font-size: 0.7rem;
-  padding: 2px;
-}
-
+/* Slash Menu */
 .slash-menu {
   width: 200px;
   background: #1e1e2e;
@@ -396,6 +284,7 @@ body {
   cursor: pointer;
 }
 
+/* Tree Views (Used by Sidebar Views) */
 .generic-tree-node {
   user-select: none;
 }

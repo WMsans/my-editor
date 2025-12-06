@@ -1,5 +1,6 @@
 import { HostAPI, PluginManifest, TreeViewOptions, TreeView, TopbarItemOptions, TopbarItemControl, WebviewViewOptions, WebviewView } from "./types";
 import { Editor } from "@tiptap/react";
+import { EditorState } from "@tiptap/pm/state";
 import { registry } from "./Registry";
 import { pluginEventBus } from "./events/PluginEventBus";
 import { fsService, workspaceManager } from "../services";
@@ -19,7 +20,7 @@ export const createHostAPI = (
   pluginManager?: PluginManager 
 ): HostAPI => {
   
-  const resolvePath = (path: string) => {
+  const resolvePath = (path: string): string => {
     const root = getRootPath();
     if (!root) return path; 
     if (path.startsWith("/") || path.match(/^[a-zA-Z]:/)) return path; 
@@ -29,8 +30,8 @@ export const createHostAPI = (
 
   return {
     events: {
-        emit: (event, data) => pluginEventBus.emit(event, data),
-        on: (event, handler) => {
+        emit: (event: string, data?: unknown) => pluginEventBus.emit(event, data),
+        on: (event: string, handler: (data: unknown) => void) => {
             const unsub = pluginEventBus.on(event, handler);
             return { dispose: unsub };
         }
@@ -41,13 +42,13 @@ export const createHostAPI = (
         console.log(`[Main] TreeView registered: ${viewId}`);
         return {
           dispose: () => console.log(`[Main] TreeView disposed: ${viewId}`),
-          reveal: async (element, options) => {}
+          reveal: async (_element: T, _options?) => { /* impl */ }
         };
       },
       registerWebviewView: (viewId: string, options: WebviewViewOptions): WebviewView => {
           registry.registerWebviewView(viewId, options);
           return {
-              update: (html) => {},
+              update: (_html: string) => {},
               dispose: () => {}
           };
       },
@@ -58,7 +59,7 @@ export const createHostAPI = (
              dispose: () => registry.removeTopbarItem(options.id)
          };
       },
-      showInformationMessage: async (message: string, ...items: string[]) => {
+      showInformationMessage: async (message: string, ..._items: string[]) => {
         setWarningMsg(message);
         return undefined;
       }
@@ -75,10 +76,10 @@ export const createHostAPI = (
          const ext = createWebviewBlockExtension({ id, ...options });
          registry.registerExtension(ext);
       },
-      insertContent: (content) => {
+      insertContent: (content: unknown) => {
         getEditor()?.chain().focus().insertContent(content).run();
       },
-      insertContentAt: (range, content) => {
+      insertContentAt: (range: { from: number; to: number }, content: unknown) => {
         getEditor()?.chain().focus().insertContentAt(range, content).run();
       }
     },
@@ -91,12 +92,11 @@ export const createHostAPI = (
       executeCommand: (id, args) => registry.executeCommand(id, args)
     },
     data: {
-      getDoc: () => {
-        // [CHANGED] Use WorkspaceManager to retrieve current Doc
+      getDoc: (): Y.Doc => {
         const doc = workspaceManager.getCurrentDoc();
         return doc || new Y.Doc();
       },
-      getMap: (name: string) => {
+      getMap: (name: string): Y.Map<unknown> => {
         const doc = workspaceManager.getCurrentDoc() || new Y.Doc();
         return doc.getMap(name); 
       },
@@ -116,7 +116,7 @@ export const createHostAPI = (
 
 export const createScopedAPI = (baseApi: HostAPI, pluginId: string, permissions: string[] = []): HostAPI => {
   const hasPermission = (perm: string) => permissions.includes(perm);
-  // ... (Remainder of createScopedAPI is unchanged)
+  
   return {
     ...baseApi,
     window: {

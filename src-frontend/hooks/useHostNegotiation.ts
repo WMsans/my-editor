@@ -4,8 +4,7 @@ import { fsService, authService } from "../services";
 import { useProjectStore } from "../stores/useProjectStore";
 import { useP2PStore } from "../stores/useP2PStore";
 import { useUIStore } from "../stores/useUIStore";
-
-const META_FILE = ".collab_meta.json";
+import { FILES } from "../constants";
 
 export function useHostNegotiation(
   isAutoJoiningRef: React.MutableRefObject<boolean>,
@@ -56,7 +55,7 @@ export function useHostNegotiation(
             requiredPlugins: pluginLoader.getEnabledUniversalPlugins()
         };
 
-        const metaPath = `${rootPath}/${META_FILE}`;
+        const metaPath = `${rootPath}/${FILES.METADATA}`;
         await fsService.writeFileString(metaPath, JSON.stringify(metaObj, null, 2));
 
         setEncryptionKey(newKey);
@@ -86,7 +85,7 @@ export function useHostNegotiation(
 
         try {
             setStatus(retryCount > 0 ? `Negotiating (${retryCount + 1})...` : "Negotiating host...");
-            const metaPath = `${rootPath}/${META_FILE}`;
+            const metaPath = `${rootPath}/${FILES.METADATA}`;
             
             try { await fsService.gitPull(rootPath, sshKeyPath || ""); } catch (e) { /* Ignore */ }
 
@@ -195,7 +194,7 @@ export function useHostNegotiation(
     };
 
     negotiateHost();
-  }, [rootPath, myPeerId, myAddresses, isHost, deadHostId, sshKeyPath]); // Added sshKeyPath to deps
+  }, [rootPath, myPeerId, myAddresses, isHost, deadHostId, sshKeyPath]); 
 
   return { updateProjectKey };
 }

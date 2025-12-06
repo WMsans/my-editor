@@ -207,3 +207,21 @@ export interface ActivePlugin {
   instance: any;
   cleanup?: () => void;
 }
+
+export interface PluginExports {
+    activate?: (api: HostAPI) => Promise<void> | void;
+    deactivate?: () => Promise<void> | void;
+    [key: string]: unknown;
+}
+
+export interface PluginModule {
+    exports: PluginExports;
+}
+
+export type SyntheticRequire = (modName: string) => any;
+
+export interface DirectoryEntry {
+    name: string;
+    path: string;
+    is_dir: boolean;
+}
