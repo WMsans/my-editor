@@ -1,4 +1,5 @@
 import { Mod, SidebarTab, HostAPI, PluginManifest, ViewContainerContribution, ViewContribution, RegisteredTopbarItem, Disposable, WebviewViewOptions } from "./types";
+import { pluginEventBus } from "./events/PluginEventBus";
 
 interface SlashCommandDef {
     id: string; 
@@ -26,23 +27,20 @@ class Registry {
   private slashCommands: SlashCommandDef[] = [];
   private topbarItems: RegisteredTopbarItem[] = [];
   
-  // [PHASE 1] Static Contributions
+  // Static Contributions
   private viewContainers: RegisteredViewContainer[] = [];
   private views: Map<string, RegisteredView[]> = new Map();
   
-  // [NEW] Webview Providers
+  // Webview Providers
   private webviewViews: Map<string, WebviewViewOptions> = new Map();
 
   // Command Handlers
   private commandHandlers = new Map<string, (args?: any) => void>();
   
-  // Registry Change Listeners
+  // Registry Change Listeners (Internal UI updates)
   private listeners: (() => void)[] = [];
 
-  // [PHASE 4] Application Event Bus
-  private eventListeners = new Map<string, ((data: any) => void)[]>();
-  private globalEventListeners: ((event: string, data: any) => void)[] = [];
-
+  // API Reference
   private api: HostAPI | null = null;
 
   init(api: HostAPI) {
@@ -59,13 +57,11 @@ class Registry {
     this.views.clear();
     this.webviewViews.clear(); 
     this.notify();
-
-    // Clear events
-    this.eventListeners.clear();
-    this.globalEventListeners = [];
+    
+    // Note: We do not clear pluginEventBus here as it may be used by system services
   }
 
-  // --- Registry Subscription ---
+  // --- Registry Subscription (UI Updates) ---
   subscribe(listener: () => void) {
       this.listeners.push(listener);
       return () => {
@@ -77,62 +73,26 @@ class Registry {
       this.listeners.forEach(l => l());
   }
 
-  // --- [PHASE 4] Event Bus Implementation ---
+  // --- Event Bus Delegation ---
   
-  /**
-   * Listen to a specific event
-   */
   on(event: string, handler: (data: any) => void): Disposable {
-      if (!this.eventListeners.has(event)) {
-          this.eventListeners.set(event, []);
-      }
-      this.eventListeners.get(event)!.push(handler);
-      
-      return {
-          dispose: () => {
-              const handlers = this.eventListeners.get(event);
-              if (handlers) {
-                  this.eventListeners.set(event, handlers.filter(h => h !== handler));
-              }
-          }
-      };
+      const unsub = pluginEventBus.on(event, handler);
+      return { dispose: unsub };
   }
 
-  /**
-   * Listen to ALL events (used by WorkerBridge)
-   */
   subscribeToAll(handler: (event: string, data: any) => void): Disposable {
-      this.globalEventListeners.push(handler);
-      return {
-          dispose: () => {
-              this.globalEventListeners = this.globalEventListeners.filter(h => h !== handler);
-          }
-      };
+      return pluginEventBus.subscribeToAll(handler);
   }
 
-  /**
-   * Emit an event to all listeners
-   */
   emit(event: string, data?: any) {
-      // 1. Notify specific listeners
-      const handlers = this.eventListeners.get(event);
-      if (handlers) {
-          handlers.forEach(h => {
-              try { h(data); } catch(e) { console.error(`Error in event handler for ${event}:`, e); }
-          });
-      }
-
-      // 2. Notify global listeners (e.g., Worker Bridge)
-      this.globalEventListeners.forEach(h => {
-          try { h(event, data); } catch(e) { console.error(`Error in global event handler for ${event}:`, e); }
-      });
+      pluginEventBus.emit(event, data);
   }
 
-  // --- [PHASE 1] Static Registration ---
+  // --- Static Registration ---
   registerManifest(manifest: PluginManifest) {
     if (!manifest.contributes) return;
 
-    // 1. Slash Commands (Static)
+    // 1. Slash Commands
     if (manifest.contributes.slashMenu) {
         manifest.contributes.slashMenu.forEach(cmd => {
             this.registerSlashCommand({
@@ -144,7 +104,7 @@ class Registry {
         });
     }
 
-    // 2. View Containers (Activity Bar)
+    // 2. View Containers
     if (manifest.contributes.viewsContainers?.activitybar) {
         manifest.contributes.viewsContainers.activitybar.forEach(vc => {
             this.viewContainers.push({
@@ -154,7 +114,7 @@ class Registry {
         });
     }
 
-    // 3. Views (Side Panels)
+    // 3. Views
     if (manifest.contributes.views) {
         for (const [containerId, viewList] of Object.entries(manifest.contributes.views)) {
             if (!this.views.has(containerId)) {
@@ -172,6 +132,14 @@ class Registry {
 
   getViewContainers() { return this.viewContainers; }
   getViews(containerId: string) { return this.views.get(containerId) || []; }
+  
+  getPluginIdForView(viewId: string): string | undefined {
+      for (const [_, views] of this.views) {
+          const found = views.find(v => v.id === viewId);
+          if (found) return found.pluginId;
+      }
+      return undefined;
+  }
 
   // --- Extension Management ---
   registerExtension(ext: any, priority: 'high' | 'normal' = 'normal') {

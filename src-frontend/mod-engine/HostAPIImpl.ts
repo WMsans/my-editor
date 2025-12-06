@@ -1,7 +1,8 @@
 import { HostAPI, PluginManifest, TreeViewOptions, TreeView, TopbarItemOptions, TopbarItemControl, WebviewViewOptions, WebviewView } from "./types";
 import { Editor } from "@tiptap/react";
 import { registry } from "./Registry";
-import { invoke } from "@tauri-apps/api/core";
+import { pluginEventBus } from "./events/PluginEventBus";
+import { fsService } from "../services"; 
 import * as Y from "yjs";
 import { createWebviewBlockExtension } from "../components/WebviewBlock";
 
@@ -21,22 +22,27 @@ export const createHostAPI = (
   // Helper to resolve paths relative to root
   const resolvePath = (path: string) => {
     const root = getRootPath();
-    if (!root) return path; // Fallback if no project open
-    if (path.startsWith("/") || path.match(/^[a-zA-Z]:/)) return path; // Already absolute
+    if (!root) return path; 
+    if (path.startsWith("/") || path.match(/^[a-zA-Z]:/)) return path; 
     const sep = root.includes("\\") ? "\\" : "/";
     return `${root}${sep}${path}`;
   };
 
   return {
-    // [PHASE 4] Event Bus
+    // [PHASE 4] Event Bus via Unified Bus
     events: {
-        emit: (event, data) => registry.emit(event, data),
-        on: (event, handler) => registry.on(event, handler)
+        emit: (event, data) => pluginEventBus.emit(event, data),
+        on: (event, handler) => {
+            const unsub = pluginEventBus.on(event, handler);
+            return { dispose: unsub };
+        }
     },
 
-    // [PHASE 2] Window API Implementation
     window: {
       createTreeView: <T>(viewId: string, options: TreeViewOptions<T>): TreeView<T> => {
+        // Tree views are now data-driven and handled by the PluginController
+        // Logic specific to the runtime (Worker/Main) is handled in the Controller.
+        // This method in HostAPI is primarily for Local/Main-thread plugins.
         console.log(`[Main] TreeView registered: ${viewId}`);
         return {
           dispose: () => console.log(`[Main] TreeView disposed: ${viewId}`),
@@ -47,13 +53,11 @@ export const createHostAPI = (
       },
       registerWebviewView: (viewId: string, options: WebviewViewOptions): WebviewView => {
           registry.registerWebviewView(viewId, options);
-          console.log(`[Main] Webview View registered: ${viewId}`);
           return {
               update: (html) => console.log("Update not implemented for static registration"),
               dispose: () => console.log("Dispose not implemented")
           };
       },
-      // [NEW] Local implementation (for local plugins)
       createTopbarItem: (options: TopbarItemOptions): TopbarItemControl => {
          registry.registerTopbarItem({ ...options, pluginId: 'host-local' });
          return {
@@ -74,14 +78,10 @@ export const createHostAPI = (
       registerExtension: (ext, options) => {
         const priority = options?.priority || 'normal';
         registry.registerExtension(ext, priority);
-        console.log(`Extension registered (Priority: ${priority})`);
       },
       registerWebviewBlock: (id, options) => {
-         // Note: If called directly via 'baseApi' (not scoped), pluginId might be missing.
-         // This is fine for internal tools, but plugins should use scoped API.
          const ext = createWebviewBlockExtension({ id, ...options });
          registry.registerExtension(ext);
-         console.log(`[Main] Registered Webview Block: ${id}`);
       },
       insertContent: (content) => {
         getEditor()?.chain().focus().insertContent(content).run();
@@ -91,20 +91,12 @@ export const createHostAPI = (
       }
     },
     ui: {
-      registerSidebarTab: (tab) => {
-        registry.registerSidebarTab(tab);
-      },
-      showNotification: (msg) => {
-        setWarningMsg(msg);
-      }
+      registerSidebarTab: (tab) => registry.registerSidebarTab(tab),
+      showNotification: (msg) => setWarningMsg(msg)
     },
     commands: {
-      registerCommand: (id, handler) => {
-        registry.registerCommand(id, handler);
-      },
-      executeCommand: (id, args) => {
-        registry.executeCommand(id, args);
-      }
+      registerCommand: (id, handler) => registry.registerCommand(id, handler),
+      executeCommand: (id, args) => registry.executeCommand(id, args)
     },
     data: {
       getDoc: () => {
@@ -118,15 +110,19 @@ export const createHostAPI = (
         return new Y.Doc().getMap(name); 
       },
       fs: {
+        // [PHASE 4] Use FileSystemService instead of direct invokes
         readFile: async (path: string) => {
-          return await invoke<number[]>("read_file_content", { path: resolvePath(path) });
+          return await fsService.readFile(resolvePath(path));
         },
         writeFile: async (path: string, content: number[]) => {
-          await invoke("write_file_content", { path: resolvePath(path), content });
-          await invoke("broadcast_update", { path, data: content });
+          await fsService.writeFile(resolvePath(path), content);
+          // Broadcast is handled by service or DocumentRegistry if needed, 
+          // but here we keep the raw fs behavior. 
+          // Note: P2P broadcast usually happens in DocumentRegistry. 
+          // If we need raw FS broadcast, we can add it here.
         },
         createDirectory: async (path: string) => {
-          return await invoke("create_directory", { path: resolvePath(path) });
+          return await fsService.createDirectory(resolvePath(path));
         }
       }
     },
@@ -147,13 +143,18 @@ export const createScopedAPI = (baseApi: HostAPI, pluginId: string, permissions:
         ...baseApi.window,
         registerWebviewView: (viewId, options) => {
             return baseApi.window.registerWebviewView(viewId, { ...options, pluginId });
+        },
+        createTopbarItem: (options) => {
+            registry.registerTopbarItem({ ...options, pluginId });
+             return {
+                 update: (opt) => registry.updateTopbarItem(options.id, opt),
+                 dispose: () => registry.removeTopbarItem(options.id)
+             };
         }
     },
     editor: {
         ...baseApi.editor,
         registerWebviewBlock: (id, options) => {
-            // Automatically attach the pluginId to the webview options
-            // This enables the "plugin://<id>/" scheme in the frontend component
             baseApi.editor.registerWebviewBlock(id, { ...options, pluginId });
         }
     },
@@ -162,8 +163,7 @@ export const createScopedAPI = (baseApi: HostAPI, pluginId: string, permissions:
       fs: {
         readFile: async (path: string) => {
           if (!hasPermission("filesystem")) {
-            const msg = `Security Violation: Plugin '${pluginId}' attempted to read file '${path}' without 'filesystem' permission.`;
-            console.error(msg);
+            const msg = `Security Violation: Plugin '${pluginId}' attempted to read file without permission.`;
             baseApi.ui.showNotification(msg);
             throw new Error(msg);
           }
@@ -171,8 +171,7 @@ export const createScopedAPI = (baseApi: HostAPI, pluginId: string, permissions:
         },
         writeFile: async (path: string, content: number[]) => {
           if (!hasPermission("filesystem")) {
-            const msg = `Security Violation: Plugin '${pluginId}' attempted to write file '${path}' without 'filesystem' permission.`;
-            console.error(msg);
+            const msg = `Security Violation: Plugin '${pluginId}' attempted to write file without permission.`;
             baseApi.ui.showNotification(msg);
             throw new Error(msg);
           }
@@ -180,10 +179,9 @@ export const createScopedAPI = (baseApi: HostAPI, pluginId: string, permissions:
         },
         createDirectory: async (path: string) => {
           if (!hasPermission("filesystem")) {
-            const msg = `Security Violation: Plugin '${pluginId}' attempted to create directory '${path}' without 'filesystem' permission.`;
-            console.error(msg);
-            baseApi.ui.showNotification(msg);
-            throw new Error(msg);
+             const msg = `Security Violation: Plugin '${pluginId}' attempted to create directory without permission.`;
+             baseApi.ui.showNotification(msg);
+             throw new Error(msg);
           }
           return baseApi.data.fs.createDirectory(path);
         }
