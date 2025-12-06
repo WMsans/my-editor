@@ -1,36 +1,22 @@
 import React, { useState, useEffect } from "react";
+import { useProjectStore } from "../stores/useProjectStore";
+import { useUIStore } from "../stores/useUIStore";
 
-interface SettingsProps {
-  isOpen: boolean;
-  onClose: () => void;
-  sshKeyPath: string;
-  setSshKeyPath: (path: string) => void;
-  encryptionKey: string;
-  // Fix: Allow Dispatch<SetStateAction<string>> compatibility
-  setEncryptionKey: (key: string) => void; 
-  detectedRemote: string;
-}
+export const Settings: React.FC = () => {
+  const { isSettingsOpen, setShowSettings } = useUIStore();
+  const { sshKeyPath, setSshKeyPath, encryptionKey, setEncryptionKey, detectedRemote } = useProjectStore();
 
-export const Settings: React.FC<SettingsProps> = ({
-  isOpen,
-  onClose,
-  sshKeyPath,
-  setSshKeyPath,
-  encryptionKey,
-  setEncryptionKey,
-  detectedRemote
-}) => {
   const [localSshPath, setLocalSshPath] = useState(sshKeyPath);
   const [localEncKey, setLocalEncKey] = useState(encryptionKey);
 
   useEffect(() => {
-    if (isOpen) {
+    if (isSettingsOpen) {
       setLocalSshPath(sshKeyPath);
       setLocalEncKey(encryptionKey);
     }
-  }, [isOpen, sshKeyPath, encryptionKey]);
+  }, [isSettingsOpen, sshKeyPath, encryptionKey]);
 
-  if (!isOpen) return null;
+  if (!isSettingsOpen) return null;
 
   const generateKey = () => {
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
@@ -44,34 +30,24 @@ export const Settings: React.FC<SettingsProps> = ({
   const handleSave = () => {
     setSshKeyPath(localSshPath);
     setEncryptionKey(localEncKey);
-    onClose();
+    setShowSettings(false);
   };
 
   return (
-    <div className="settings-overlay" onClick={onClose}>
+    <div className="settings-overlay" onClick={() => setShowSettings(false)}>
       <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
         <h3>Settings</h3>
         
         <div className="setting-group">
           <label>SSH Private Key Path (Optional)</label>
-          <input 
-            type="text" 
-            value={localSshPath} 
-            onChange={(e) => setLocalSshPath(e.target.value)} 
-            placeholder="/Users/username/.ssh/id_rsa"
-          />
+          <input type="text" value={localSshPath} onChange={(e) => setLocalSshPath(e.target.value)} placeholder="/Users/username/.ssh/id_rsa"/>
           <small>Leave empty to use <code>~/.ssh/config</code> or SSH Agent.</small>
         </div>
 
         <div className="setting-group">
           <label>IP Encryption Key (Optional)</label>
           <div className="row">
-            <input 
-              type="password" 
-              value={localEncKey} 
-              onChange={(e) => setLocalEncKey(e.target.value)} 
-              placeholder="Enter secret key..."
-            />
+            <input type="password" value={localEncKey} onChange={(e) => setLocalEncKey(e.target.value)} placeholder="Enter secret key..."/>
             <button onClick={generateKey} style={{ whiteSpace: 'nowrap' }}>Generate</button>
           </div>
           <small>If set, your IP address in the project file will be encrypted.</small>
@@ -85,13 +61,8 @@ export const Settings: React.FC<SettingsProps> = ({
         )}
 
         <div className="actions">
-          <button 
-            onClick={handleSave} 
-            style={{ marginRight: "10px", background: "#89b4fa", color: "#1e1e2e" }}
-          >
-            Save Changes
-          </button>
-          <button onClick={onClose} className="btn-close">Cancel</button>
+          <button onClick={handleSave} style={{ marginRight: "10px", background: "#89b4fa", color: "#1e1e2e" }}>Save Changes</button>
+          <button onClick={() => setShowSettings(false)} className="btn-close">Cancel</button>
         </div>
       </div>
     </div>

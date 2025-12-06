@@ -1,45 +1,42 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useRef, useCallback, useEffect } from "react";
 import { open } from "@tauri-apps/plugin-dialog"; 
 import { documentRegistry } from "../mod-engine/DocumentRegistry";
 import { pluginLoader } from "../mod-engine/PluginLoader";
-import { fsService, authService } from "../services";
+import { fsService } from "../services";
+import { useProjectStore } from "../stores/useProjectStore";
+import { useUIStore } from "../stores/useUIStore";
 
 const META_FILE = ".collab_meta.json";
 
-export function useProject(setWarningMsg: (msg: string | null) => void) {
-  const [rootPath, setRootPath] = useState<string>("");
-  const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
-  const [fileSystemRefresh, setFileSystemRefresh] = useState(0);
-  const [sshKeyPath, setSshKeyPath] = useState(localStorage.getItem("sshKeyPath") || "");
-  const [detectedRemote, setDetectedRemote] = useState("");
-
-  const rootPathRef = useRef(rootPath);
-  const sshKeyPathRef = useRef(sshKeyPath);
-  const currentFilePathRef = useRef(currentFilePath);
+export function useProject() {
+  // Select state from stores
+  const { 
+    rootPath, setRootPath, 
+    setCurrentFilePath,
+    triggerFileSystemRefresh,
+    sshKeyPath,
+    setDetectedRemote
+  } = useProjectStore();
+  
+  const setWarningMsg = useUIStore(s => s.setWarningMsg);
+  
+  // Refs for logic that needs current values without triggering re-renders
   const isAutoJoining = useRef(false);
 
+  // Sync Registry
   useEffect(() => {
-    rootPathRef.current = rootPath;
     documentRegistry.setRootPath(rootPath);
   }, [rootPath]);
 
-  useEffect(() => {
-    sshKeyPathRef.current = sshKeyPath;
-    localStorage.setItem("sshKeyPath", sshKeyPath);
-  }, [sshKeyPath]);
-
-  useEffect(() => { currentFilePathRef.current = currentFilePath; }, [currentFilePath]);
-
   const getRelativePath = useCallback((file: string | null) => {
-    const root = rootPathRef.current;
-    if (!root || !file) return null;
-    if (file.startsWith(root)) {
-      let rel = file.substring(root.length);
+    if (!rootPath || !file) return null;
+    if (file.startsWith(rootPath)) {
+      let rel = file.substring(rootPath.length);
       if (rel.startsWith("/") || rel.startsWith("\\")) rel = rel.substring(1);
       return rel;
     }
     return file; 
-  }, []);
+  }, [rootPath]);
 
   const refreshRemoteOrigin = useCallback(async () => {
     if (rootPath) {
@@ -50,7 +47,7 @@ export function useProject(setWarningMsg: (msg: string | null) => void) {
             setDetectedRemote("");
         }
     }
-  }, [rootPath]);
+  }, [rootPath, setDetectedRemote]);
 
   const handleOpenFolder = async () => {
     if (rootPath) {
@@ -83,7 +80,7 @@ export function useProject(setWarningMsg: (msg: string | null) => void) {
         } catch (e) { /* Ignore */ }
 
         setRootPath(selected);
-        setFileSystemRefresh(prev => prev + 1);
+        triggerFileSystemRefresh();
         setDetectedRemote("");
         try {
           await fsService.initGitRepo(selected);
@@ -102,8 +99,9 @@ export function useProject(setWarningMsg: (msg: string | null) => void) {
     let destPath: string | null = null;
     let silent = false;
 
-    if (isAutoJoining.current && rootPathRef.current) {
-        destPath = rootPathRef.current;
+    // We can read the current rootPath from the store via the hook variable
+    if (isAutoJoining.current && rootPath) {
+        destPath = rootPath;
         silent = true; 
         isAutoJoining.current = false; 
     } else {
@@ -133,7 +131,7 @@ export function useProject(setWarningMsg: (msg: string | null) => void) {
         } catch (e) { /* Ignore */ }
 
         setRootPath(destPath);
-        setFileSystemRefresh(prev => prev + 1);
+        triggerFileSystemRefresh();
         setDetectedRemote("");
         if (!silent) alert(`Project cloned to ${destPath}`);
       } catch (e: any) {
@@ -141,18 +139,14 @@ export function useProject(setWarningMsg: (msg: string | null) => void) {
         throw e;
       }
     }
-  }, [setWarningMsg]);
+  }, [rootPath, setRootPath, setWarningMsg, triggerFileSystemRefresh, setDetectedRemote]);
 
   return {
-    rootPath, rootPathRef,
-    currentFilePath, setCurrentFilePath, currentFilePathRef,
-    fileSystemRefresh, setFileSystemRefresh,
-    sshKeyPath, setSshKeyPath, sshKeyPathRef,
-    detectedRemote, refreshRemoteOrigin,
-    isAutoJoining,
+    isAutoJoining, // Exposed ref for negotiation hook
     handleOpenFolder,
-    handleNewFile: useCallback(() => setCurrentFilePath(null), []),
+    handleNewFile: useCallback(() => setCurrentFilePath(null), [setCurrentFilePath]),
     handleProjectReceived,
-    getRelativePath
+    getRelativePath,
+    refreshRemoteOrigin
   };
 }

@@ -1,31 +1,20 @@
 import { useEffect, useRef } from "react";
 import { pluginLoader } from "../mod-engine/PluginLoader";
 import { fsService, authService } from "../services";
+import { useProjectStore } from "../stores/useProjectStore";
+import { useP2PStore } from "../stores/useP2PStore";
+import { useUIStore } from "../stores/useUIStore";
 
 const META_FILE = ".collab_meta.json";
 
-interface UseHostNegotiationProps {
-  rootPath: string;
-  myPeerId: string | null;
-  myAddresses: string[];
-  sshKeyPathRef: React.MutableRefObject<string>;
-  encryptionKeyRef: React.MutableRefObject<string>;
-  setEncryptionKey: (key: string) => void;
-  isHost: boolean;
-  deadHostIdRef: React.MutableRefObject<string | null>;
-  isAutoJoiningRef: React.MutableRefObject<boolean>;
-  sendJoinRequest: (peerId: string, addrs: string[]) => void;
-  setStatus: (status: string) => void;
-  setWarningMsg: (msg: string | null) => void;
-  requestPassword: (msg: string) => Promise<string | null>;
-}
-
-export function useHostNegotiation({
-  rootPath, myPeerId, myAddresses, sshKeyPathRef,
-  encryptionKeyRef, setEncryptionKey, isHost,
-  deadHostIdRef, isAutoJoiningRef, sendJoinRequest,
-  setStatus, setWarningMsg, requestPassword
-}: UseHostNegotiationProps) {
+export function useHostNegotiation(
+  isAutoJoiningRef: React.MutableRefObject<boolean>,
+  sendJoinRequest: (peerId: string, addrs: string[]) => void
+) {
+  // Access stores
+  const { rootPath, sshKeyPath, encryptionKey, setEncryptionKey } = useProjectStore();
+  const { myPeerId, myAddresses, isHost, deadHostId, setStatus, setDeadHostId } = useP2PStore();
+  const { setWarningMsg, requestPassword } = useUIStore();
 
   const isNegotiatingRef = useRef(false);
 
@@ -61,7 +50,7 @@ export function useHostNegotiation({
         setEncryptionKey(newKey);
         authService.setKey(newKey); // Sync to service
 
-        await fsService.pushChanges(rootPath, sshKeyPathRef.current || "");
+        await fsService.pushChanges(rootPath, sshKeyPath || "");
         setStatus("Key updated & pushed.");
     } catch (e: any) {
         setWarningMsg(`Failed to update key: ${e.toString()}`);
@@ -79,7 +68,7 @@ export function useHostNegotiation({
             setStatus(retryCount > 0 ? `Negotiating (${retryCount + 1})...` : "Negotiating host...");
             const metaPath = `${rootPath}/${META_FILE}`;
             
-            try { await fsService.gitPull(rootPath, sshKeyPathRef.current || ""); } catch (e) { /* Ignore */ }
+            try { await fsService.gitPull(rootPath, sshKeyPath || ""); } catch (e) { /* Ignore */ }
 
             let metaHost = "";
             let metaAddrs: string[] = [];
@@ -124,10 +113,9 @@ export function useHostNegotiation({
                 }
             } catch (e) { /* Meta missing/invalid is fine */ }
 
-            // Logic: Join existing host or Claim host
             if (metaHost && metaHost !== myPeerId) {
-                if (deadHostIdRef.current !== metaHost) {
-                    if (!isHost) return; // Safety
+                if (deadHostId !== metaHost) {
+                    if (!isHost) return; 
 
                     const missing = pluginLoader.checkMissingRequirements(requiredPlugins);
                     if (missing.length > 0) {
@@ -142,13 +130,11 @@ export function useHostNegotiation({
                 }
             }
 
-            // Claim Host
             if (metaHost === myPeerId && JSON.stringify(metaAddrs.sort()) === JSON.stringify(myAddresses.sort())) {
                  setStatus("I am the host (verified).");
                  return;
             }
 
-            // Write self as host
             let storedAddrs: any = myAddresses;
             let storedCheck: any = "";
             const activeKey = authService.getKey();
@@ -169,9 +155,9 @@ export function useHostNegotiation({
             await fsService.writeFileString(metaPath, JSON.stringify(metaObj, null, 2));
             
             try {
-                await fsService.pushChanges(rootPath, sshKeyPathRef.current || "");
+                await fsService.pushChanges(rootPath, sshKeyPath || "");
                 setStatus("Host claimed and synced.");
-                deadHostIdRef.current = null;
+                setDeadHostId(null);
             } catch (e) {
                  if (retryCount < 2) setTimeout(() => negotiateHost(retryCount + 1), 2000);
                  else setStatus("Host (Offline/Local)");
@@ -185,7 +171,7 @@ export function useHostNegotiation({
     };
 
     negotiateHost();
-  }, [rootPath, myPeerId, myAddresses, isHost]);
+  }, [rootPath, myPeerId, myAddresses, isHost, deadHostId]); // React to store changes
 
   return { updateProjectKey };
 }

@@ -1,21 +1,19 @@
-import { useState, useEffect, useCallback } from "react";
+import { useEffect, useCallback } from "react";
 import { p2pService } from "../services";
+import { useP2PStore } from "../stores/useP2PStore";
+import { documentRegistry } from "../mod-engine/DocumentRegistry";
 
 export function useP2P(
   onProjectReceived: (data: number[]) => void,
-  onHostDisconnect?: (hostId: string) => void,
   onFileSync?: (path: string) => void
 ) {
-  const [myPeerId, setMyPeerId] = useState<string | null>(p2pService.getPeerId());
-  const [myAddresses, setMyAddresses] = useState<string[]>(p2pService.getAddresses());
-  const [incomingRequest, setIncomingRequest] = useState<string | null>(null);
-  const [isHost, setIsHost] = useState(p2pService.getIsHost());
-  const [status, setStatus] = useState("Initializing...");
-  const [connectedPeers, setConnectedPeers] = useState(0);
-  const [isJoining, setIsJoining] = useState(false);
+  const {
+    setIsHost, setStatus, setMyPeerId, setMyAddresses,
+    setIncomingRequest, setConnectedPeers, setIsJoining,
+    incomingRequest, setDeadHostId
+  } = useP2PStore();
 
   useEffect(() => {
-    // Subscribe to Service Events
     const unsubs = [
       p2pService.on('identity-updated', (data: any) => {
         setMyPeerId(data.peerId);
@@ -29,20 +27,31 @@ export function useP2P(
       p2pService.on('role-changed', (host: boolean) => setIsHost(host)),
       p2pService.on('status-change', (msg: string) => setStatus(msg)),
       p2pService.on('project-received', (data: number[]) => {
-          setIsJoining(false); // Clear joining state
+          setIsJoining(false); 
           onProjectReceived(data);
       }),
-      p2pService.on('host-disconnected', (id: string) => onHostDisconnect && onHostDisconnect(id)),
+      p2pService.on('host-disconnected', (id: string) => setDeadHostId(id)),
       p2pService.on('file-synced', (path: string) => onFileSync && onFileSync(path))
     ];
 
     return () => unsubs.forEach(fn => fn());
-  }, [onProjectReceived, onHostDisconnect, onFileSync]);
+  }, [onProjectReceived, onFileSync]);
+
+  // Sync Registry Host Status
+  useEffect(() => {
+    // We subscribe to the store state here to keep Registry in sync
+    const unsub = useP2PStore.subscribe((state, prevState) => {
+        if (state.isHost !== prevState.isHost) {
+            documentRegistry.setIsHost(state.isHost);
+        }
+    });
+    return () => unsub();
+  }, []);
 
   const sendJoinRequest = useCallback(async (peerId: string, remoteAddrs: string[] = []) => {
     setIsJoining(true);
     await p2pService.sendJoinRequest(peerId, remoteAddrs);
-  }, []);
+  }, [setIsJoining]);
 
   const acceptRequest = useCallback(async (currentPath: string) => {
     if (!incomingRequest) return;
@@ -57,9 +66,9 @@ export function useP2P(
     } catch (e) {
       setStatus(`Error accepting: ${e}`);
     }
-  }, [incomingRequest]);
+  }, [incomingRequest, setIncomingRequest, setStatus]);
 
-  const rejectRequest = useCallback(() => setIncomingRequest(null), []);
+  const rejectRequest = useCallback(() => setIncomingRequest(null), [setIncomingRequest]);
 
   const requestSync = useCallback(async (path: string) => {
     try {
@@ -70,17 +79,9 @@ export function useP2P(
   }, []);
 
   return {
-    myPeerId,
-    incomingRequest,
-    isHost,
-    isJoining,
-    status,
-    setStatus,
     sendJoinRequest,
     acceptRequest,
     rejectRequest,
-    requestSync,
-    myAddresses,
-    connectedPeers
+    requestSync
   };
 }

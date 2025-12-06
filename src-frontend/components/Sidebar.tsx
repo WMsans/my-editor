@@ -4,31 +4,36 @@ import { IncomingRequest } from "./IncomingRequest";
 import { registry } from "../mod-engine/Registry";
 import { ExtensionSidebarView } from "./ExtensionSidebarView"; 
 import { SidebarWebview } from "./SidebarWebview"; 
+import { useProjectStore } from "../stores/useProjectStore";
+import { useP2PStore } from "../stores/useP2PStore";
+import { useUIStore } from "../stores/useUIStore";
+import { p2pService } from "../services";
 
-interface SidebarProps {
-  rootPath: string;
-  onOpenFile: (path: string) => void;
-  fileSystemRefresh: number;
-  isHost: boolean;
-  status: string;
-  incomingRequest: string | null;
-  onAcceptRequest: () => void;
-  onRejectRequest: () => void;
-}
+// No props needed!
+export const Sidebar: React.FC = () => {
+  const { activeSidebarTab, setActiveSidebarTab } = useUIStore();
+  const { rootPath, setCurrentFilePath } = useProjectStore();
+  const { 
+    isHost, status, incomingRequest, 
+    setIncomingRequest, setStatus 
+  } = useP2PStore();
 
-export const Sidebar: React.FC<SidebarProps> = ({
-  rootPath,
-  onOpenFile,
-  fileSystemRefresh,
-  isHost,
-  status,
-  incomingRequest,
-  onAcceptRequest,
-  onRejectRequest
-}) => {
-  const [activeTab, setActiveTab] = useState("files");
   const [width, setWidth] = useState(250);
   const [isResizing, setIsResizing] = useState(false);
+
+  // Actions wrapped here or imported from p2p logic if complex
+  const handleAcceptRequest = async () => {
+      if(!incomingRequest || !rootPath) return;
+      try {
+        await p2pService.approveJoin(incomingRequest, rootPath);
+        setIncomingRequest(null);
+        setStatus(`Accepted ${incomingRequest.slice(0, 8)}. Sending folder...`);
+      } catch (e) {
+        setStatus("Error: " + e);
+      }
+  };
+
+  const handleRejectRequest = () => setIncomingRequest(null);
 
   // Resize Logic
   const startResizing = useCallback(() => setIsResizing(true), []);
@@ -38,7 +43,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     (mouseMoveEvent: MouseEvent) => {
       if (isResizing) {
         const newWidth = mouseMoveEvent.clientX;
-        // Limit min/max width
         if (newWidth > 100 && newWidth < 600) {
           setWidth(newWidth);
         }
@@ -58,24 +62,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
   }, [isResizing, resize, stopResizing]);
   
-  // Legacy Tabs (Deprecated)
   const pluginTabs = registry.getSidebarTabs();
-  
-  // [PHASE 1] Static Containers
   const viewContainers = registry.getViewContainers();
 
-  // Standard Panels
   const renderContent = () => {
-    if (activeTab === "files") {
-      return (
-        <FileExplorer 
-          rootPath={rootPath} 
-          onOpenFile={onOpenFile} 
-          refreshTrigger={fileSystemRefresh} 
-        />
-      );
+    if (activeSidebarTab === "files") {
+      return <FileExplorer />;
     }
-    if (activeTab === "p2p") {
+    if (activeSidebarTab === "p2p") {
       return (
         <div className="p2p-panel">
           <h3>P2P Status: {isHost ? "Host" : "Guest"}</h3>
@@ -83,23 +77,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {incomingRequest && (
             <IncomingRequest 
               peerId={incomingRequest} 
-              onAccept={onAcceptRequest} 
-              onReject={onRejectRequest} 
+              onAccept={handleAcceptRequest} 
+              onReject={handleRejectRequest} 
             />
           )}
         </div>
       );
     }
     
-    // Legacy Plugin Panels (Avoid using if possible)
-    const plugin = pluginTabs.find(t => t.id === activeTab);
+    // Legacy Plugin Panels
+    const plugin = pluginTabs.find(t => t.id === activeSidebarTab);
     if (plugin) {
       const Component = plugin.component;
       return <div className="plugin-panel"><Component /></div>;
     }
 
-    // [PHASE 3] Generic View Rendering
-    const container = viewContainers.find(c => c.id === activeTab);
+    // View Containers
+    const container = viewContainers.find(c => c.id === activeSidebarTab);
     if (container) {
         const views = registry.getViews(container.id);
         return (
@@ -109,103 +103,42 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {views.length === 0 && <div className="sidebar-empty">No views registered.</div>}
                 
                 {views.map(view => {
-                    // Check if this is a webview
                     if (view.type === 'webview') {
                          const options = registry.getWebviewView(view.id);
                          if (!options) return <div key={view.id} className="sidebar-empty">Loading {view.name}...</div>;
-                         return (
-                             <SidebarWebview 
-                                 key={view.id}
-                                 viewId={view.id}
-                                 options={options}
-                             />
-                         );
+                         return <SidebarWebview key={view.id} viewId={view.id} options={options} />;
                     }
-                    
-                    // Default to Tree View
-                    return (
-                        <ExtensionSidebarView 
-                            key={view.id} 
-                            viewId={view.id} 
-                            name={view.name} 
-                        />
-                    );
+                    return <ExtensionSidebarView key={view.id} viewId={view.id} name={view.name} />;
                 })}
             </div>
         );
     }
-    
     return null;
   };
 
   return (
     <aside className="sidebar-container" style={{ display: 'flex', width: `${width}px`, borderRight: '1px solid #313244', position: 'relative' }}>
-      {/* Activity Bar (Left Strip) */}
       <div className="activity-bar" style={{ width: '48px', background: '#11111b', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: '10px', borderRight: '1px solid #313244' }}>
         
-        <div
-          className={`activity-icon ${activeTab === 'files' ? 'active' : ''}`} 
-          onClick={() => setActiveTab('files')}
-          title="Explorer"
-          style={{ cursor: 'pointer', padding: '10px', opacity: activeTab === 'files' ? 1 : 0.5, fontSize: '1.2rem' }}
-        >
-          📂
-        </div>
+        <div className={`activity-icon ${activeSidebarTab === 'files' ? 'active' : ''}`} onClick={() => setActiveSidebarTab('files')} title="Explorer" style={{ cursor: 'pointer', padding: '10px', opacity: activeSidebarTab === 'files' ? 1 : 0.5, fontSize: '1.2rem' }}>📂</div>
 
-        <div 
-          className={`activity-icon ${activeTab === 'p2p' ? 'active' : ''}`} 
-          onClick={() => setActiveTab('p2p')}
-          title="Collaboration"
-          style={{ cursor: 'pointer', padding: '10px', opacity: activeTab === 'p2p' ? 1 : 0.5, fontSize: '1.2rem' }}
-        >
-          📡
-        </div>
+        <div className={`activity-icon ${activeSidebarTab === 'p2p' ? 'active' : ''}`} onClick={() => setActiveSidebarTab('p2p')} title="Collaboration" style={{ cursor: 'pointer', padding: '10px', opacity: activeSidebarTab === 'p2p' ? 1 : 0.5, fontSize: '1.2rem' }}>📡</div>
 
-        {/* Legacy Plugin Icons */}
         {pluginTabs.map(tab => (
-           <div 
-             key={tab.id}
-             className={`activity-icon ${activeTab === tab.id ? 'active' : ''}`} 
-             onClick={() => setActiveTab(tab.id)}
-             title={tab.label}
-             style={{ cursor: 'pointer', padding: '10px', opacity: activeTab === tab.id ? 1 : 0.5, fontSize: '1.2rem' }}
-           >
-             {tab.icon}
-           </div>
+           <div key={tab.id} className={`activity-icon ${activeSidebarTab === tab.id ? 'active' : ''}`} onClick={() => setActiveSidebarTab(tab.id)} title={tab.label} style={{ cursor: 'pointer', padding: '10px', opacity: activeSidebarTab === tab.id ? 1 : 0.5, fontSize: '1.2rem' }}>{tab.icon}</div>
         ))}
 
-        {/* [PHASE 1] Static View Containers */}
         {viewContainers.map(container => (
-            <div
-             key={container.id}
-             className={`activity-icon ${activeTab === container.id ? 'active' : ''}`} 
-             onClick={() => setActiveTab(container.id)}
-             title={container.title}
-             style={{ cursor: 'pointer', padding: '10px', opacity: activeTab === container.id ? 1 : 0.5, fontSize: '1.2rem' }}
-           >
-             {container.icon}
-           </div>
+            <div key={container.id} className={`activity-icon ${activeSidebarTab === container.id ? 'active' : ''}`} onClick={() => setActiveSidebarTab(container.id)} title={container.title} style={{ cursor: 'pointer', padding: '10px', opacity: activeSidebarTab === container.id ? 1 : 0.5, fontSize: '1.2rem' }}>{container.icon}</div>
         ))}
 
       </div>
 
-      {/* Side Panel Content - FIX: pointerEvents: none during resize */}
-      <div className="side-panel" style={{ 
-          flex: 1, 
-          overflow: 'hidden', 
-          display: 'flex', 
-          flexDirection: 'column', 
-          background: '#181825',
-          pointerEvents: isResizing ? 'none' : 'auto' 
-      }}>
+      <div className="side-panel" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: '#181825', pointerEvents: isResizing ? 'none' : 'auto' }}>
          {renderContent()}
       </div>
 
-      {/* Resize Handle */}
-      <div 
-        className={`sidebar-resizer ${isResizing ? 'active' : ''}`}
-        onMouseDown={startResizing}
-      />
+      <div className={`sidebar-resizer ${isResizing ? 'active' : ''}`} onMouseDown={startResizing} />
     </aside>
   );
 };

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useProjectStore } from "../stores/useProjectStore";
 
 interface FileEntry {
   name: string;
@@ -7,13 +8,7 @@ interface FileEntry {
   is_dir: boolean;
 }
 
-interface FileExplorerProps {
-  rootPath: string;
-  onOpenFile: (path: string) => void;
-  refreshTrigger: number;
-}
-
-// Sort directories first, then files
+// Helper: Sort entries
 const sortEntries = (entries: FileEntry[]) => {
   return entries.sort((a, b) => {
     if (a.is_dir === b.is_dir) return a.name.localeCompare(b.name);
@@ -23,10 +18,9 @@ const sortEntries = (entries: FileEntry[]) => {
 
 const FileNode: React.FC<{ 
   entry: FileEntry; 
-  onOpenFile: (path: string) => void; 
   depth: number;
-  refreshTrigger: number;
-}> = ({ entry, onOpenFile, depth, refreshTrigger }) => {
+}> = ({ entry, depth }) => {
+  const { setCurrentFilePath, fileSystemRefresh } = useProjectStore();
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<FileEntry[]>([]);
 
@@ -39,20 +33,17 @@ const FileNode: React.FC<{
     }
   };
 
-  // Reload children when refreshTrigger changes if the folder is already open
   useEffect(() => {
     if (expanded && entry.is_dir) {
       loadChildren();
     }
-  }, [refreshTrigger, expanded]);
+  }, [fileSystemRefresh, expanded]);
 
   const toggleExpand = async () => {
     if (!entry.is_dir) {
-      onOpenFile(entry.path);
+      setCurrentFilePath(entry.path);
       return;
     }
-    
-    // If opening a folder, load its children
     if (!expanded) {
       await loadChildren();
     }
@@ -72,13 +63,7 @@ const FileNode: React.FC<{
       {expanded && entry.is_dir && (
         <div>
           {children.map((child) => (
-            <FileNode 
-              key={child.path} 
-              entry={child} 
-              onOpenFile={onOpenFile} 
-              depth={depth + 1} 
-              refreshTrigger={refreshTrigger}
-            />
+            <FileNode key={child.path} entry={child} depth={depth + 1} />
           ))}
         </div>
       )}
@@ -86,7 +71,8 @@ const FileNode: React.FC<{
   );
 };
 
-export const FileExplorer: React.FC<FileExplorerProps> = ({ rootPath, onOpenFile, refreshTrigger }) => {
+export const FileExplorer: React.FC = () => {
+  const { rootPath, fileSystemRefresh } = useProjectStore();
   const [rootFiles, setRootFiles] = useState<FileEntry[]>([]);
 
   useEffect(() => {
@@ -94,7 +80,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ rootPath, onOpenFile
     invoke<FileEntry[]>("read_directory", { path: rootPath })
       .then((files) => setRootFiles(sortEntries(files)))
       .catch((e) => console.error("Failed to load root", e));
-  }, [rootPath, refreshTrigger]);
+  }, [rootPath, fileSystemRefresh]);
 
   if (!rootPath) return <div className="sidebar-empty">No folder opened</div>;
 
@@ -102,13 +88,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ rootPath, onOpenFile
     <div className="file-explorer">
       <div className="sidebar-header">EXPLORER</div>
       {rootFiles.map((file) => (
-        <FileNode 
-          key={file.path} 
-          entry={file} 
-          onOpenFile={onOpenFile} 
-          depth={0} 
-          refreshTrigger={refreshTrigger}
-        />
+        <FileNode key={file.path} entry={file} depth={0} />
       ))}
     </div>
   );
