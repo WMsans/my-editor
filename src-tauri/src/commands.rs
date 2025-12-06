@@ -270,7 +270,6 @@ pub fn push_changes(path: String, ssh_key_path: String) -> Result<String, String
     }
 
     cmd.env("GIT_TERMINAL_PROMPT", "0");
-    // [FIX] Ensure no GUI side effects
     cmd.env("SSH_ASKPASS", "false");
     cmd.env("GIT_ASKPASS", "false");
     #[cfg(target_os = "linux")]

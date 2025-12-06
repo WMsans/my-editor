@@ -18,6 +18,7 @@ export function useAppLifecycle() {
       const { rootPath, sshKeyPath } = useProjectStore.getState();
       const { isHost, connectedPeers } = useP2PStore.getState();
 
+      // If a project is open and we haven't already prepared to quit...
       if (rootPath && !pendingQuit) {
         event.preventDefault(); 
         setIsPushing(true);
@@ -54,20 +55,25 @@ export function useAppLifecycle() {
              }
              await invoke("push_changes", { path: rootPath, sshKeyPath: sshKeyPath || "" });
           }
-          await win.destroy();
+          
+          setPendingQuit(true);
+          
+          await win.close();
         } catch (e: any) {
           setIsPushing(false);
           setWarningMsg(`Failed to push changes before quitting:\n\n${e}\n\nQuit anyway?`);
-          setPendingQuit(true);
+          // We do not set pendingQuit here; we wait for user confirmation in the modal
         }
-      } else if (pendingQuit) {
-         event.preventDefault();
-      }
+      } 
+      // If pendingQuit is true, we do nothing, effectively allowing the event to propagate and close the app.
     });
     return () => { unlisten.then(f => f()); };
   }, [pendingQuit, setWarningMsg]);
 
+  // Regular quit triggers the lifecycle check
   const handleQuit = async () => { const win = getCurrentWindow(); await win.close(); };
+  
+  // Force quit (from modal) destroys immediately
   const handleForceQuit = async () => { await getCurrentWindow().destroy(); };
 
   return { pendingQuit, setPendingQuit, isPushing, handleQuit, handleForceQuit };
