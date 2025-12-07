@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { RegisteredTopbarItem } from "../engine/types";
-import { useProjectStore } from "../core/stores/useProjectStore";
-import { useUIStore } from "../core/stores/useUIStore";
-import { useTopbar } from "./hooks/useTopbar";
+import { RegisteredTopbarItem } from "../../../engine/types";
+import { useProjectStore } from "../../../core/stores/useProjectStore";
+import { useUIStore } from "../../../core/stores/useUIStore";
+import { useTopbar } from "../../hooks/useTopbar";
 import styles from "./MenuBar.module.css"; 
 
 interface MenuBarProps {
@@ -13,22 +13,12 @@ interface MenuBarProps {
 }
 
 export const MenuBar: React.FC<MenuBarProps> = ({ 
-  onNew, 
-  onOpenFolder, 
-  onSave, 
-  onQuit 
+  onNew, onOpenFolder, onSave, onQuit 
 }) => {
   const { currentFilePath } = useProjectStore();
   const { setShowSettings } = useUIStore();
-  
-  // Use Custom Hook for Logic
   const { items: extraItems } = useTopbar();
-
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
-
-  const toggleMenu = (menu: string) => {
-    setActiveMenu(activeMenu === menu ? null : menu);
-  };
 
   useEffect(() => {
     const close = () => setActiveMenu(null);
@@ -37,18 +27,19 @@ export const MenuBar: React.FC<MenuBarProps> = ({
   }, []);
 
   const renderItem = (item: RegisteredTopbarItem) => {
-    const style: React.CSSProperties = { 
-        marginLeft: '10px', fontSize: '0.8rem', padding: '4px 8px',
-        background: item.disabled ? '#252635' : '#313244',
-        border: '1px solid #45475a', color: item.disabled ? '#585b70' : '#cdd6f4',
-        borderRadius: '4px', cursor: item.disabled ? 'default' : 'pointer',
-        width: item.width || 'auto', opacity: item.disabled ? 0.6 : 1,
-        pointerEvents: item.disabled ? 'none' : 'auto'
-    };
+    // Dynamic width must remain inline, but everything else moves to CSS
+    const widthStyle = item.width ? { width: item.width } : {};
 
     if (item.type === 'button') {
         return (
-            <button key={item.id} style={style} onClick={(e) => { e.stopPropagation(); if (!item.disabled) item.onClick?.(); }} disabled={item.disabled} title={item.tooltip}>
+            <button 
+                key={item.id} 
+                className={styles.toolbarItem}
+                style={widthStyle}
+                onClick={(e) => { e.stopPropagation(); if (!item.disabled) item.onClick?.(); }} 
+                disabled={item.disabled} 
+                title={item.tooltip}
+            >
                 {item.icon && <span style={{marginRight: item.label ? '5px':0}}>{item.icon}</span>}
                 {item.label}
             </button>
@@ -57,18 +48,34 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     
     if (item.type === 'text') {
         return (
-            <div key={item.id} style={{ display: 'flex', alignItems: 'center', marginLeft: '10px' }}>
-                {item.label && <span style={{marginRight: '5px', fontSize: '0.8rem', color:'#a6adc8'}}>{item.label}</span>}
-                <input type="text" placeholder={item.placeholder} defaultValue={item.value} style={{ ...style, cursor: 'text', background: '#11111b' }} onChange={(e) => item.onChange?.(e.target.value)} onClick={(e) => e.stopPropagation()} disabled={item.disabled} />
+            <div key={item.id} className={styles.toolbarInputContainer}>
+                {item.label && <span className={styles.toolbarLabel}>{item.label}</span>}
+                <input 
+                    type="text" 
+                    className={`${styles.toolbarItem} ${styles.toolbarInput}`}
+                    style={widthStyle}
+                    placeholder={item.placeholder} 
+                    defaultValue={item.value} 
+                    onChange={(e) => item.onChange?.(e.target.value)} 
+                    onClick={(e) => e.stopPropagation()} 
+                    disabled={item.disabled} 
+                />
             </div>
         );
     }
 
     if (item.type === 'dropdown') {
         return (
-            <div key={item.id} style={{ display: 'flex', alignItems: 'center', marginLeft: '10px' }}>
-                 {item.label && <span style={{marginRight: '5px', fontSize: '0.8rem', color:'#a6adc8'}}>{item.label}</span>}
-                 <select style={style} defaultValue={item.value} onChange={(e) => item.onChange?.(e.target.value)} onClick={(e) => e.stopPropagation()} disabled={item.disabled}>
+            <div key={item.id} className={styles.toolbarInputContainer}>
+                 {item.label && <span className={styles.toolbarLabel}>{item.label}</span>}
+                 <select 
+                    className={styles.toolbarItem}
+                    style={widthStyle}
+                    defaultValue={item.value} 
+                    onChange={(e) => item.onChange?.(e.target.value)} 
+                    onClick={(e) => e.stopPropagation()} 
+                    disabled={item.disabled}
+                 >
                      {item.options?.map(opt => ( <option key={opt} value={opt}>{opt}</option> ))}
                  </select>
             </div>
@@ -80,7 +87,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
   return (
     <div className={styles.topBar} onClick={(e) => e.stopPropagation()}>
       <div className={styles.menuItem}>
-        <span onClick={() => toggleMenu("file")}>File</span>
+        <span onClick={() => setActiveMenu(activeMenu === "file" ? null : "file")}>File</span>
         {activeMenu === "file" && (
           <div className={styles.dropdown}>
             <div className={styles.dropdownItem} onClick={() => { onNew(); setActiveMenu(null); }}>New File</div>

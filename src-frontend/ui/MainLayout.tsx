@@ -1,7 +1,7 @@
 import React from "react";
 import { Sidebar } from "./features/sidebar/Sidebar";
 import { EditorArea } from "./features/editor/EditorArea";
-import { MenuBar } from "./MenuBar";
+import { MenuBar } from "./features/menubar/MenuBar";
 import { Editor } from "@tiptap/react";
 
 interface MainLayoutProps {

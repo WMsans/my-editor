@@ -1,0 +1,115 @@
+.topBar {
+  height: 35px;
+  background-color: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  padding: 0 1rem;
+  border-bottom: 1px solid var(--border-color);
+  user-select: none;
+  z-index: 1000;
+  transition: background-color 0.2s, border-color 0.2s;
+}
+
+.menuItem {
+  position: relative;
+  cursor: pointer;
+  margin-right: 1rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.menuItem:hover {
+  color: var(--text-secondary);
+}
+
+.dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  min-width: 150px;
+  z-index: 101;
+  border-radius: 4px;
+  padding: 5px 0;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+}
+
+.dropdownItem {
+  padding: 5px 15px;
+  cursor: pointer;
+  color: var(--text-primary);
+}
+
+.dropdownItem:hover {
+  background: var(--border-hover);
+}
+
+.separator {
+  height: 1px;
+  background: var(--border-focus);
+  margin: 4px 0;
+  padding: 0;
+}
+
+.pluginToolbar {
+  display: flex;
+  align-items: center;
+  border-left: 1px solid var(--border-color);
+  padding-left: 10px;
+  height: 100%;
+}
+
+.currentFileLabel {
+  margin-left: auto;
+  font-size: 0.8em;
+  color: var(--text-muted);
+}
+
+/* New classes to replace inline styles */
+.toolbarItem {
+  margin-left: 10px;
+  font-size: 0.8rem;
+  padding: 4px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-hover);
+  color: var(--text-primary);
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 1;
+  transition: all 0.2s;
+}
+
+.toolbarItem:hover:not(:disabled) {
+  background: var(--border-hover);
+}
+
+.toolbarItem:disabled {
+  cursor: default;
+  opacity: 0.6;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+}
+
+.toolbarInputContainer {
+  display: flex;
+  align-items: center;
+  margin-left: 10px;
+}
+
+.toolbarLabel {
+  margin-right: 5px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.toolbarInput {
+  margin-left: 0; /* Reset */
+  cursor: text;
+  background: var(--bg-tertiary);
+}
+
+.toolbarInput:focus {
+  outline: none;
+  border-color: var(--accent);
+}

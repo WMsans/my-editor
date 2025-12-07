@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { FileExplorer } from "../explorer/FileExplorer";
 import { IncomingRequest } from "../activity/IncomingRequest";
-import { useServices } from "../../contexts/ServiceContext"; // New Import
+import { useServices } from "../../contexts/ServiceContext";
 import { useProjectStore } from "../../../core/stores/useProjectStore";
 import { useSessionStore } from "../../../core/stores/useSessionStore";
 import { useUIStore } from "../../../core/stores/useUIStore";
@@ -9,15 +9,14 @@ import { useP2P } from "../activity/useP2P";
 import { SidebarWebview } from "./SidebarWebview";
 import { ExtensionSidebarView } from "./ExtensionSidebarView";
 
+import styles from "./Sidebar.module.css"; 
+
 export const Sidebar: React.FC = () => {
   const { activeSidebarTab, setActiveSidebarTab } = useUIStore();
   const { rootPath } = useProjectStore();
-  const { registry } = useServices(); // Use Service
+  const { registry } = useServices();
   
-  const { 
-    isHost, statusMessage, incomingRequest
-  } = useSessionStore();
-
+  const { isHost, statusMessage, incomingRequest } = useSessionStore();
   const { acceptRequest, rejectRequest } = useP2P();
 
   const [width, setWidth] = useState(250);
@@ -26,8 +25,6 @@ export const Sidebar: React.FC = () => {
   const handleAcceptRequest = async () => {
       if (rootPath) await acceptRequest(rootPath);
   };
-
-  const handleRejectRequest = () => rejectRequest();
 
   // Resize Logic
   const startResizing = useCallback(() => setIsResizing(true), []);
@@ -56,7 +53,7 @@ export const Sidebar: React.FC = () => {
     };
   }, [isResizing, resize, stopResizing]);
   
-  // Data from Service
+  // Data
   const pluginTabs = registry.getSidebarTabs();
   const viewContainers = registry.getViewContainers();
 
@@ -66,14 +63,14 @@ export const Sidebar: React.FC = () => {
     }
     if (activeSidebarTab === "p2p") {
       return (
-        <div className="p2p-panel">
+        <div className="p2p-panel" style={{ padding: '10px' }}>
           <h3>P2P Status: {isHost ? "Host" : "Guest"}</h3>
           <p className="status-text">{statusMessage}</p>
           {incomingRequest && (
             <IncomingRequest 
               peerId={incomingRequest} 
               onAccept={handleAcceptRequest} 
-              onReject={handleRejectRequest} 
+              onReject={() => rejectRequest()} 
             />
           )}
         </div>
@@ -84,7 +81,7 @@ export const Sidebar: React.FC = () => {
     const plugin = pluginTabs.find(t => t.id === activeSidebarTab);
     if (plugin) {
       const Component = plugin.component;
-      return <div className="plugin-panel"><Component /></div>;
+      return <div className={styles.pluginPanel}><Component /></div>;
     }
 
     // View Containers
@@ -92,15 +89,15 @@ export const Sidebar: React.FC = () => {
     if (container) {
         const views = registry.getViews(container.id);
         return (
-            <div className="plugin-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                <div className="sidebar-header">{container.title.toUpperCase()}</div>
+            <div className={styles.pluginPanel}>
+                <div className={styles.panelHeader}>{container.title.toUpperCase()}</div>
                 
-                {views.length === 0 && <div className="sidebar-empty">No views registered.</div>}
+                {views.length === 0 && <div className={styles.sidebarEmpty}>No views registered.</div>}
                 
                 {views.map(view => {
                     if (view.type === 'webview') {
                          const options = registry.getWebviewView(view.id);
-                         if (!options) return <div key={view.id} className="sidebar-empty">Loading {view.name}...</div>;
+                         if (!options) return <div key={view.id} className={styles.sidebarEmpty}>Loading {view.name}...</div>;
                          return <SidebarWebview key={view.id} viewId={view.id} options={options} />;
                     }
                     return <ExtensionSidebarView key={view.id} viewId={view.id} name={view.name} />;
@@ -112,28 +109,56 @@ export const Sidebar: React.FC = () => {
   };
 
   return (
-    <aside className="sidebar-container" style={{ display: 'flex', width: `${width}px`, borderRight: '1px solid #313244', position: 'relative' }}>
-      <div className="activity-bar" style={{ width: '48px', background: '#11111b', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: '10px', borderRight: '1px solid #313244' }}>
+    <aside className={styles.container} style={{ width: `${width}px` }}>
+      <div className={styles.activityBar}>
         
-        <div className={`activity-icon ${activeSidebarTab === 'files' ? 'active' : ''}`} onClick={() => setActiveSidebarTab('files')} title="Explorer" style={{ cursor: 'pointer', padding: '10px', opacity: activeSidebarTab === 'files' ? 1 : 0.5, fontSize: '1.2rem' }}>📂</div>
+        <div 
+            className={`${styles.activityIcon} ${activeSidebarTab === 'files' ? styles.active : ''}`} 
+            onClick={() => setActiveSidebarTab('files')} 
+            title="Explorer"
+        >📂</div>
 
-        <div className={`activity-icon ${activeSidebarTab === 'p2p' ? 'active' : ''}`} onClick={() => setActiveSidebarTab('p2p')} title="Collaboration" style={{ cursor: 'pointer', padding: '10px', opacity: activeSidebarTab === 'p2p' ? 1 : 0.5, fontSize: '1.2rem' }}>📡</div>
+        <div 
+            className={`${styles.activityIcon} ${activeSidebarTab === 'p2p' ? styles.active : ''}`} 
+            onClick={() => setActiveSidebarTab('p2p')} 
+            title="Collaboration"
+        >📡</div>
 
         {pluginTabs.map(tab => (
-           <div key={tab.id} className={`activity-icon ${activeSidebarTab === tab.id ? 'active' : ''}`} onClick={() => setActiveSidebarTab(tab.id)} title={tab.label} style={{ cursor: 'pointer', padding: '10px', opacity: activeSidebarTab === tab.id ? 1 : 0.5, fontSize: '1.2rem' }}>{tab.icon}</div>
+           <div 
+                key={tab.id} 
+                className={`${styles.activityIcon} ${activeSidebarTab === tab.id ? styles.active : ''}`} 
+                onClick={() => setActiveSidebarTab(tab.id)} 
+                title={tab.label}
+            >
+                {tab.icon}
+            </div>
         ))}
 
         {viewContainers.map(container => (
-            <div key={container.id} className={`activity-icon ${activeSidebarTab === container.id ? 'active' : ''}`} onClick={() => setActiveSidebarTab(container.id)} title={container.title} style={{ cursor: 'pointer', padding: '10px', opacity: activeSidebarTab === container.id ? 1 : 0.5, fontSize: '1.2rem' }}>{container.icon}</div>
+            <div 
+                key={container.id} 
+                className={`${styles.activityIcon} ${activeSidebarTab === container.id ? styles.active : ''}`} 
+                onClick={() => setActiveSidebarTab(container.id)} 
+                title={container.title}
+            >
+                {container.icon}
+            </div>
         ))}
 
       </div>
 
-      <div className="side-panel" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: '#181825', pointerEvents: isResizing ? 'none' : 'auto' }}>
+      <div 
+        className={styles.sidePanel} 
+        style={{ pointerEvents: isResizing ? 'none' : 'auto' }}
+      >
          {renderContent()}
       </div>
 
-      <div className={`sidebar-resizer ${isResizing ? 'active' : ''}`} onMouseDown={startResizing} />
+      <div 
+        className={`${styles.resizer} ${isResizing ? styles.active : ''}`} 
+        onMouseDown={startResizing} 
+      />
     </aside>
   );
 };
