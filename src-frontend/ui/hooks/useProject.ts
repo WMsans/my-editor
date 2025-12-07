@@ -69,9 +69,12 @@ export function useProject() {
         setDetectedRemote("");
         try {
           await fsService.initGitRepo(selected);
+          
+          await fsService.gitPull(selected, sshKeyPath || "");
+
           const remote = await fsService.getRemoteOrigin(selected);
           setDetectedRemote(remote);
-        } catch (e) { /* Ignore */ }
+        } catch (e) { console.warn("Git init/pull warning:", e); }
 
         setRootPath(selected);
         triggerFileSystemRefresh();

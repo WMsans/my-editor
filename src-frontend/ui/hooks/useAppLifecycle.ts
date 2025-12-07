@@ -5,6 +5,7 @@ import { pluginLoader } from "../../engine/PluginLoader";
 import { useProjectStore } from "../../core/stores/useProjectStore";
 import { useP2PStore } from "../../core/stores/useP2PStore";
 import { useUIStore } from "../../core/stores/useUIStore";
+import { fsService } from "../../core/services";
 
 export function useAppLifecycle() {
   const [pendingQuit, setPendingQuit] = useState(false);
@@ -58,7 +59,8 @@ export function useAppLifecycle() {
                  }
              }
              
-             const pushPromise = invoke("push_changes", { path: rootPath, sshKeyPath: sshKeyPath || "" });
+             const pushPromise = fsService.pushChanges(rootPath, sshKeyPath || "");
+             
              const timeoutPromise = new Promise((_, reject) => 
                  setTimeout(() => reject(new Error("Push operation timed out (15s). Network may be slow or down.")), 15000)
              );

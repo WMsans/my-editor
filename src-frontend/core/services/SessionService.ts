@@ -150,6 +150,16 @@ export class SessionService {
       };
 
       await this.fs.writeFileString(metaPath, JSON.stringify(newMeta, null, 2));
+
+      const { sshKeyPath } = useProjectStore.getState();
+      try {
+          store.setStatus('negotiating', "Publishing session...");
+          await this.fs.pushChanges(rootPath, sshKeyPath);
+      } catch (e) {
+          console.error("Failed to push host metadata", e);
+          useUIStore.getState().setWarningMsg("Session started, but failed to publish to remote. Peers may not be able to discover you automatically.");
+      }
+
       this.setHostRole(true);
       store.setStatus('connected', "Hosting Session");
   }
