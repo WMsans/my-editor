@@ -81,7 +81,7 @@ export const ExtensionSidebarView: React.FC<ExtensionSidebarViewProps> = ({
     <div className="extension-view">
       <div className="view-header" style={{ 
           padding: '5px 15px', 
-          background: '#313244', 
+          background: 'var(--border-color)', 
           fontSize: '0.8rem', 
           fontWeight: 'bold',
           display: 'flex',
@@ -91,10 +91,10 @@ export const ExtensionSidebarView: React.FC<ExtensionSidebarViewProps> = ({
       </div>
       
       <div className="view-content" style={{ padding: '5px 0' }}>
-        {error && <div className="error-msg" style={{color: '#f38ba8', padding: '10px'}}>{error}</div>}
+        {error && <div className="error-msg" style={{color: 'var(--text-muted)', padding: '10px'}}>{error}</div>}
         
         {loading && rootItems.length === 0 && (
-            <div style={{padding: '10px', color: '#6c7086'}}>Loading view...</div>
+            <div style={{padding: '10px', color: 'var(--text-muted)'}}>Loading view...</div>
         )}
 
         {!loading && rootItems.length === 0 && !error && (

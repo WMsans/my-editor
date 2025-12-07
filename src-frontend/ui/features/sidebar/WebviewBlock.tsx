@@ -52,8 +52,26 @@ const WebviewBlockComponent = (props: any) => {
         <html>
         <head>
           <style>
-            body { margin: 0; padding: 0; background: transparent; color: #cdd6f4; font-family: sans-serif; }
+            body { margin: 0; padding: 0; background: transparent; color: var(--text-primary); font-family: sans-serif; }
           </style>
+          <script>
+            // Sync Theme Variables from Parent
+            function syncTheme() {
+                try {
+                    const p = window.parent.document.documentElement;
+                    const s = window.parent.getComputedStyle(p);
+                    const vars = [
+                        '--bg-primary', '--bg-secondary', '--bg-tertiary',
+                        '--text-primary', '--text-secondary', '--text-muted',
+                        '--border-color', '--border-hover', '--accent'
+                    ];
+                    vars.forEach(v => {
+                        document.documentElement.style.setProperty(v, s.getPropertyValue(v));
+                    });
+                } catch(e) { console.warn('Theme sync failed', e); }
+            }
+            syncTheme();
+          </script>
         </head>
         <body>
           ${initialHtml}
@@ -123,10 +141,10 @@ const WebviewBlockComponent = (props: any) => {
 
   return (
     <NodeViewWrapper className="webview-block" style={{ 
-        border: '1px solid #45475a', 
+        border: '1px solid var(--border-color)', 
         borderRadius: '6px', 
         overflow: 'hidden', 
-        background: '#181825', 
+        background: 'var(--bg-secondary)', 
         display: 'flex', 
         flexDirection: 'column' 
     }}>
@@ -138,7 +156,6 @@ const WebviewBlockComponent = (props: any) => {
             height: `${height}px`, 
             border: 'none', 
             display: 'block',
-            // Fix: Disable pointer events during drag so mouse doesn't get "stuck" in iframe
             pointerEvents: isResizing ? 'none' : 'auto'
         }} 
         title="Webview Block"
@@ -148,18 +165,18 @@ const WebviewBlockComponent = (props: any) => {
         onMouseDown={handleMouseDown}
         style={{
             height: '12px',
-            background: '#11111b',
-            borderTop: '1px solid #313244',
+            background: 'var(--bg-tertiary)',
+            borderTop: '1px solid var(--border-color)',
             cursor: 'ns-resize',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             transition: 'background 0.2s',
         }}
-        onMouseEnter={(e) => e.currentTarget.style.background = '#313244'}
-        onMouseLeave={(e) => e.currentTarget.style.background = '#11111b'}
+        onMouseEnter={(e) => e.currentTarget.style.background = 'var(--border-color)'}
+        onMouseLeave={(e) => e.currentTarget.style.background = 'var(--bg-tertiary)'}
       >
-        <div style={{ width: '40px', height: '4px', borderRadius: '2px', background: '#45475a' }}></div>
+        <div style={{ width: '40px', height: '4px', borderRadius: '2px', background: 'var(--border-hover)' }}></div>
       </div>
     </NodeViewWrapper>
   );

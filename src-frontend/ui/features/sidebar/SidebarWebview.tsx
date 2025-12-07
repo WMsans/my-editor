@@ -46,8 +46,26 @@ export const SidebarWebview: React.FC<SidebarWebviewProps> = ({ viewId, options 
         <html>
         <head>
           <style>
-            body { margin: 0; padding: 0; background: transparent; color: #cdd6f4; font-family: sans-serif; }
+            body { margin: 0; padding: 0; background: transparent; color: var(--text-primary); font-family: sans-serif; }
           </style>
+          <script>
+            // Sync Theme Variables from Parent
+            function syncTheme() {
+                try {
+                    const p = window.parent.document.documentElement;
+                    const s = window.parent.getComputedStyle(p);
+                    const vars = [
+                        '--bg-primary', '--bg-secondary', '--bg-tertiary',
+                        '--text-primary', '--text-secondary', '--text-muted',
+                        '--border-color', '--border-hover', '--accent'
+                    ];
+                    vars.forEach(v => {
+                        document.documentElement.style.setProperty(v, s.getPropertyValue(v));
+                    });
+                } catch(e) { console.warn('Theme sync failed', e); }
+            }
+            syncTheme();
+          </script>
         </head>
         <body>
           ${options.initialHtml}
@@ -71,7 +89,7 @@ export const SidebarWebview: React.FC<SidebarWebviewProps> = ({ viewId, options 
         <div className="sidebar-webview" style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%' }}>
             <iframe
                 ref={iframeRef}
-                style={{ flex: 1, width: '100%', border: 'none', background: '#1e1e2e' }}
+                style={{ flex: 1, width: '100%', border: 'none', background: 'var(--bg-primary)' }}
                 title={options.title || "Webview"}
                 sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
             />
