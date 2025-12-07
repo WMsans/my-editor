@@ -10,6 +10,7 @@ import { FILES, CHANNELS } from "../constants";
 import * as React from "react";
 import * as TiptapReact from "@tiptap/react";
 import * as TiptapCore from "@tiptap/core";
+import * as Y from "yjs";
 
 // --- Unified Plugin Controller Interface ---
 interface PluginController {
@@ -29,12 +30,107 @@ class LocalPluginController implements PluginController {
     
     // In-memory storage for Main Thread Data Providers
     private treeProviders = new Map<string, any>();
+    private moduleCache = new Map<string, any>();
+    private globalApi: HostAPI | null = null;
 
-    constructor(public id: string, public manifest: PluginManifest, private code: string) {}
+    constructor(
+      public id: string, 
+      public manifest: PluginManifest, 
+      private files: Map<string, string>
+    ) {}
+
+    private resolveId(importer: string, importPath: string): string | null {
+         // 1. Handle base path
+         const parts = importer.split('/');
+         parts.pop(); // Remove filename, keep dir
+         
+         const importParts = importPath.split('/');
+         
+         for (const part of importParts) {
+             if (part === '.') continue;
+             if (part === '..') {
+                 if (parts.length > 0) parts.pop();
+             } else {
+                 parts.push(part);
+             }
+         }
+         
+         const resolvedPath = parts.join('/');
+         
+         // 2. Try extensions
+         const candidates = [
+             resolvedPath,
+             `${resolvedPath}.ts`,
+             `${resolvedPath}.tsx`,
+             `${resolvedPath}.js`,
+             `${resolvedPath}.jsx`,
+             `${resolvedPath}/index.ts`,
+             `${resolvedPath}/index.tsx`
+         ];
+         
+         for (const c of candidates) {
+             if (this.files.has(c)) return c;
+         }
+         return null;
+    }
+
+    private require(importer: string, modName: string) {
+        // System modules
+        switch (modName) {
+            case "react": return React;
+            case "@tiptap/react": return TiptapReact;
+            case "@tiptap/core": return TiptapCore;
+            case "yjs": return Y;
+        }
+
+        // Relative modules
+        if (modName.startsWith('.')) {
+            const resolved = this.resolveId(importer, modName);
+            if (!resolved) throw new Error(`Cannot resolve module '${modName}' from '${importer}' in plugin '${this.id}'`);
+            
+            if (this.moduleCache.has(resolved)) {
+                return this.moduleCache.get(resolved);
+            }
+
+            return this.loadModule(resolved, this.globalApi!);
+        }
+
+        throw new Error(`Module '${modName}' is not available.`);
+    }
+
+    private loadModule(filePath: string, api: HostAPI): any {
+        const rawCode = this.files.get(filePath);
+        if (!rawCode) throw new Error(`File not found: ${filePath}`);
+
+        // Transpile on demand
+        let code = rawCode;
+        try {
+            const compiled = transform(rawCode, {
+                transforms: ["typescript", "jsx", "imports"],
+                filePath: filePath,
+                production: true,
+            });
+            code = compiled.code;
+        } catch (err) {
+            console.error(`Transpilation failed for ${filePath}`, err);
+            throw err;
+        }
+
+        const exports: any = {};
+        const module = { exports };
+        
+        // Create scoped require
+        const scopedRequire = (mod: string) => this.require(filePath, mod);
+
+        const runPlugin = new Function("exports", "require", "module", "api", code);
+        runPlugin(exports, scopedRequire, module, api);
+
+        this.moduleCache.set(filePath, module.exports);
+        return module.exports;
+    }
 
     async activate(api: HostAPI) {
-        const exports: PluginExports = {};
-        const module: PluginModule = { exports };
+        this.globalApi = api;
         
         // Intercept createTreeView to capture providers locally
         const interceptedApi = {
@@ -47,20 +143,14 @@ class LocalPluginController implements PluginController {
                 }
             }
         };
+        
+        // Update globalApi to use the intercepted one for modules loaded later
+        this.globalApi = interceptedApi;
 
-        const syntheticRequire: SyntheticRequire = (modName: string) => {
-          switch (modName) {
-            case "react": return React;
-            case "@tiptap/react": return TiptapReact;
-            case "@tiptap/core": return TiptapCore;
-            default: throw new Error(`Module '${modName}' is not available.`);
-          }
-        };
+        // Load Main Entry Point
+        const mainModule = this.loadModule(this.manifest.main, interceptedApi);
+        this.instance = mainModule;
 
-        const runPlugin = new Function("exports", "require", "module", "api", this.code);
-        runPlugin(exports, syntheticRequire, module, interceptedApi);
-
-        this.instance = module.exports || exports;
         if (this.instance.activate) {
             await this.instance.activate(interceptedApi);
         }
@@ -71,6 +161,7 @@ class LocalPluginController implements PluginController {
             await this.instance.deactivate();
         }
         this.treeProviders.clear();
+        this.moduleCache.clear();
     }
 
     async getTreeData(viewId: string, element?: unknown): Promise<unknown[]> {
@@ -223,28 +314,51 @@ class PluginLoaderService {
   private async loadSinglePlugin(api: HostAPI, manifest: PluginManifest) {
     try {
       const root = (manifest as any)._rootPath;
-      const sep = root.includes("\\") ? "\\" : "/";
-      const mainPath = `${root}${sep}${manifest.main}`;
-      const rawCode = await fsService.readFileString(mainPath);
+      
+      // Load all files (flat or recursive)
+      const files = new Map<string, string>();
+      
+      const readDirRecursive = async (dirPath: string, relativeBase: string) => {
+          const entries = await invoke<DirectoryEntry[]>(CHANNELS.READ_DIR, { path: dirPath });
+          for (const entry of entries) {
+              const entryRelPath = relativeBase ? `${relativeBase}/${entry.name}` : entry.name;
+              if (entry.is_dir) {
+                  await readDirRecursive(entry.path, entryRelPath);
+              } else {
+                  // Only read relevant code files
+                  if (/\.(ts|tsx|js|jsx|json)$/.test(entry.name)) {
+                      try {
+                        const content = await fsService.readFileString(entry.path);
+                        files.set(entryRelPath, content);
+                      } catch (e) {
+                          console.warn(`Failed to read plugin file: ${entry.path}`);
+                      }
+                  }
+              }
+          }
+      };
+      
+      await readDirRecursive(root, "");
 
-      let code = rawCode;
-      try {
-        const compiled = transform(rawCode, {
-          transforms: ["typescript", "jsx", "imports"],
-          filePath: mainPath,
-          production: true, 
-        });
-        code = compiled.code;
-      } catch (err) {
-        console.error(`Transpilation failed for ${manifest.id}:`, err);
-        return; 
-      }
+      // Normalize main path
+      if (manifest.main.startsWith("./")) manifest.main = manifest.main.slice(2);
 
       let controller: PluginController;
 
       if (manifest.executionEnvironment === 'worker') {
          if (!this.workerClient) this.workerClient = new WorkerClient(api);
          
+         // Note: Worker controller currently assumes bundled code. 
+         // For now, we attempt to pass the main file content.
+         // Multi-file worker plugins would require a similar overhaul of the WorkerClient/RPC.
+         const mainCode = files.get(manifest.main) || "";
+         
+         // Simple transpilation for worker main (limited scope)
+         let code = mainCode;
+         try {
+            code = transform(mainCode, { transforms: ["typescript", "imports"], filePath: manifest.main, production: true }).code;
+         } catch {}
+
          controller = new WorkerPluginController(
              manifest.id, 
              manifest, 
@@ -254,7 +368,7 @@ class PluginLoaderService {
          await controller.activate(api);
       }
       else {
-        controller = new LocalPluginController(manifest.id, manifest, code);
+        controller = new LocalPluginController(manifest.id, manifest, files);
         const scopedApi = createScopedAPI(api, manifest.id, manifest.permissions || []);
         await controller.activate(scopedApi);
       }

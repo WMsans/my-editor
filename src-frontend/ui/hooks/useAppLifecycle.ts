@@ -3,8 +3,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { pluginLoader } from "../../engine/PluginLoader";
 import { useProjectStore } from "../../core/stores/useProjectStore";
-import { useP2PStore } from "../../core/stores/useP2PStore";
+import { useSessionStore } from "../../core/stores/useSessionStore";
 import { useUIStore } from "../../core/stores/useUIStore";
+import { fsService } from "../../core/services";
 
 export function useAppLifecycle() {
   const [pendingQuit, setPendingQuit] = useState(false);
@@ -19,10 +20,9 @@ export function useAppLifecycle() {
     const unlisten = win.onCloseRequested(async (event) => {
       // Access state directly (snapshot)
       const { rootPath, sshKeyPath } = useProjectStore.getState();
-      const { isHost, connectedPeers } = useP2PStore.getState();
+      const { isHost, connectedPeers } = useSessionStore.getState();
 
       // Check the ref instead of the state variable
-      // If pendingQuitRef.current is true, we skip this block and allow the window to close.
       if (rootPath && !pendingQuitRef.current) {
         event.preventDefault(); 
         setIsPushing(true);
@@ -58,7 +58,14 @@ export function useAppLifecycle() {
                  }
              }
              
-             const pushPromise = invoke("push_changes", { path: rootPath, sshKeyPath: sshKeyPath || "" });
+             try {
+                 await fsService.gitPull(rootPath, sshKeyPath || "");
+             } catch (e) {
+                 console.warn("Pull failed during quit:", e);
+             }
+
+             const pushPromise = fsService.pushChanges(rootPath, sshKeyPath || "");
+             
              const timeoutPromise = new Promise((_, reject) => 
                  setTimeout(() => reject(new Error("Push operation timed out (15s). Network may be slow or down.")), 15000)
              );
@@ -80,7 +87,7 @@ export function useAppLifecycle() {
       // If pendingQuitRef is true, we do nothing, allowing the default close event to propagate.
     });
     return () => { unlisten.then(f => f()); };
-  }, [setWarningMsg]); // pendingQuit removed from dependencies as we rely on the Ref
+  }, [setWarningMsg]); 
 
   // Regular quit triggers the lifecycle check
   const handleQuit = async () => { const win = getCurrentWindow(); await win.close(); };

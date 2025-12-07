@@ -5,6 +5,7 @@ import { pluginLoader } from "../../engine/PluginLoader";
 import { fsService } from "../../core/services";
 import { useProjectStore } from "../../core/stores/useProjectStore";
 import { useUIStore } from "../../core/stores/useUIStore";
+import { useSessionStore } from "../../core/stores/useSessionStore";
 import { FILES } from "../../constants";
 
 export function useProject() {
@@ -17,6 +18,8 @@ export function useProject() {
   } = useProjectStore();
   
   const setWarningMsg = useUIStore(s => s.setWarningMsg);
+  const { setStatus } = useSessionStore();
+  
   const isAutoJoining = useRef(false);
 
   // Sync Workspace
@@ -69,9 +72,12 @@ export function useProject() {
         setDetectedRemote("");
         try {
           await fsService.initGitRepo(selected);
+          
+          await fsService.gitPull(selected, sshKeyPath || "");
+
           const remote = await fsService.getRemoteOrigin(selected);
           setDetectedRemote(remote);
-        } catch (e) { /* Ignore */ }
+        } catch (e) { console.warn("Git init/pull warning:", e); }
 
         setRootPath(selected);
         triggerFileSystemRefresh();
@@ -85,7 +91,7 @@ export function useProject() {
     let destPath: string | null = null;
     let silent = false;
 
-    if (isAutoJoining.current && rootPath) {
+    if (rootPath) {
         destPath = rootPath;
         silent = true; 
         isAutoJoining.current = false; 
@@ -101,12 +107,16 @@ export function useProject() {
         triggerFileSystemRefresh();
         setDetectedRemote("");
         if (!silent) alert(`Project cloned to ${destPath}`);
+        
+        setStatus('connected', "Synced with Host");
       } catch (e: any) {
         setWarningMsg("Save failed: " + e.toString());
-        throw e;
+        setStatus('error', "Sync failed");
       }
+    } else {
+        setStatus('connected', "Sync cancelled");
     }
-  }, [rootPath, setRootPath, setWarningMsg, triggerFileSystemRefresh, setDetectedRemote]);
+  }, [rootPath, setRootPath, setWarningMsg, triggerFileSystemRefresh, setDetectedRemote, setStatus]);
 
   return {
     isAutoJoining, 

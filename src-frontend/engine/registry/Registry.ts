@@ -1,4 +1,4 @@
-import { SidebarTab, PluginManifest, ViewContainerContribution, ViewContribution, RegisteredTopbarItem, WebviewViewOptions, Disposable } from "../types";
+import { SidebarTab, PluginManifest, ViewContainerContribution, ViewContribution, RegisteredTopbarItem, WebviewViewOptions, Disposable, BubbleItemOptions } from "../types";
 import { pluginEventBus } from "../PluginEventBus";
 
 // The Registry is now purely a database for static contributions and UI state.
@@ -7,6 +7,7 @@ class Registry {
   private sidebarTabs: SidebarTab[] = [];
   private slashCommands: any[] = [];
   private topbarItems: RegisteredTopbarItem[] = [];
+  private bubbleItems: BubbleItemOptions[] = []; // [NEW]
   
   // Tiptap Extensions (UI/Editor core)
   private highPriorityExtensions: any[] = [];
@@ -26,6 +27,7 @@ class Registry {
     this.sidebarTabs = [];
     this.slashCommands = [];
     this.topbarItems = [];
+    this.bubbleItems = [];
     this.viewContainers = [];
     this.views.clear();
     this.webviewViews.clear(); 
@@ -118,6 +120,15 @@ class Registry {
       this.notify();
   }
   getTopbarItems() { return this.topbarItems; }
+
+  // --- Bubble Menu Items ---
+  registerBubbleItem(item: BubbleItemOptions) {
+      const idx = this.bubbleItems.findIndex(i => i.id === item.id);
+      if (idx !== -1) this.bubbleItems[idx] = item;
+      else this.bubbleItems.push(item);
+      this.notify();
+  }
+  getBubbleItems() { return this.bubbleItems; }
 
   // --- Webviews ---
   registerWebviewView(viewId: string, options: WebviewViewOptions) {

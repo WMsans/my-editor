@@ -67,6 +67,9 @@ export class CollabService extends EventEmitter {
   }
 
   public applyUpdate(path: string, update: Uint8Array, origin: string) {
+      // Ignore heartbeat signals
+      if (path === '.heartbeat') return;
+
       // If it's a binary asset (image), handle differently or ignore for Y.Doc
       if (path.match(/\.(png|jpg|jpeg|gif|svg|webp)$/i)) {
           this.emit('asset-received', { path, content: update });
