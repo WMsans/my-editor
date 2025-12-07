@@ -26,7 +26,8 @@
     "react-dom": "^19.1.0",
     "sucrase": "^3.35.1",
     "y-websocket": "^3.0.0",
-    "yjs": "^13.6.27"
+    "yjs": "^13.6.27",
+    "zustand": "^5.0.9"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
