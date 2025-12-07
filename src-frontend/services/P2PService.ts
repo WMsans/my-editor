@@ -1,28 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import { WorkspaceManager } from "./WorkspaceManager";
-import * as Y from "yjs";
 import { EventEmitter } from "./EventEmitter";
 
+/**
+ * TransportLayer
+ * Responsible strictly for sending/receiving packets and managing network identity.
+ * No business logic regarding Y.js or FileSystem.
+ */
 export class P2PService extends EventEmitter {
   private myPeerId: string | null = null;
   private myAddresses: string[] = [];
-  private connectedPeers: number = 0;
-  private isHost: boolean = true;
-  private isJoining: boolean = false;
   private unlistenFns: UnlistenFn[] = []; 
   private initialized = false;
-  
-  // Dependency Injection
-  private workspaceManager: WorkspaceManager | null = null;
 
   constructor() {
     super();
-  }
-
-  // Allow injecting the manager after instantiation to break cycles
-  injectWorkspaceManager(wm: WorkspaceManager) {
-    this.workspaceManager = wm;
   }
 
   async init() {
@@ -48,75 +40,33 @@ export class P2PService extends EventEmitter {
         }
       }),
       await listen("peer-connected", () => {
-        this.connectedPeers++;
-        this.emit('peers-changed', this.connectedPeers);
+        this.emit('peer-connected');
       }),
       await listen("peer-disconnected", () => {
-        this.connectedPeers = Math.max(0, this.connectedPeers - 1);
-        this.emit('peers-changed', this.connectedPeers);
+        this.emit('peer-disconnected');
       }),
       await listen<string>("join-requested", (e) => {
         this.emit('join-requested', e.payload);
       }),
       await listen<number[]>("join-accepted", async (e) => {
-        this.isHost = false;
-        this.isJoining = false;
-        this.emit('status-change', "Joined session! Folder synced.");
-        this.emit('project-received', e.payload);
-        this.emit('role-changed', false);
+        this.emit('join-accepted', e.payload);
       }),
       await listen<string>("host-disconnected", (e) => {
-        this.isHost = true;
         this.emit('host-disconnected', e.payload);
-        this.emit('role-changed', true); 
-        this.emit('status-change', "⚠ Host disconnected! Negotiating...");
       }),
       await listen<{ path: string, data: number[] }>("p2p-sync", (e) => {
-        this.handleSyncPacket(e.payload);
+        this.emit('sync-packet', e.payload);
       }),
       await listen<{ path: string }>("sync-requested", async (e) => {
-        const requestedPath = e.payload.path;
-        if (this.workspaceManager) {
-            const doc = this.workspaceManager.getOrCreateDoc(requestedPath);
-            const state = Y.encodeStateAsUpdate(doc);
-            invoke("broadcast_update", { path: requestedPath, data: Array.from(state) }).catch(console.error);
-        }
+        this.emit('sync-requested', e.payload.path);
       })
     );
   }
 
-  private handleSyncPacket(payload: { path: string, data: number[] }) {
-    if (!this.workspaceManager) {
-        console.warn("P2PService received sync packet but WorkspaceManager is not injected.");
-        return;
-    }
+  // --- Actions ---
 
-    const { path, data } = payload;
-    
-    if (this.isJoining) {
-        this.isJoining = false;
-        this.isHost = false;
-        this.emit('role-changed', false);
-        this.emit('status-change', "Joined session (Synced).");
-    }
-
-    if (path.match(/.(png|jpg|jpeg|gif|svg|webp)$/i) || path.startsWith("resources/")) {
-        this.workspaceManager.writeAsset(path, new Uint8Array(data));
-    } else {
-        this.workspaceManager.applyUpdate(path, new Uint8Array(data));
-    }
-    this.emit('file-synced', path);
-  }
-
-  async sendJoinRequest(peerId: string, remoteAddrs: string[] = []) {
-    this.isJoining = true;
-    this.emit('status-change', `Requesting to join ${peerId.slice(0, 8)}...`);
-    try {
-      await invoke("request_join", { peerId, remoteAddrs });
-    } catch (e: any) {
-      this.isJoining = false;
-      this.emit('status-change', `Error joining: ${e}`);
-    }
+  async sendJoinRequest(peerId: string, remoteAddrs: string[]) {
+    await invoke("request_join", { peerId, remoteAddrs });
   }
 
   async approveJoin(peerId: string, projectPath: string) {
@@ -127,6 +77,10 @@ export class P2PService extends EventEmitter {
     await invoke("request_file_sync", { path });
   }
 
+  async broadcastUpdate(path: string, data: number[]) {
+    await invoke("broadcast_update", { path, data });
+  }
+
   async destroy() {
     this.unlistenFns.forEach(unlisten => unlisten());
     this.unlistenFns = [];
@@ -134,5 +88,4 @@ export class P2PService extends EventEmitter {
 
   getPeerId() { return this.myPeerId; }
   getAddresses() { return this.myAddresses; }
-  getIsHost() { return this.isHost; }
 }

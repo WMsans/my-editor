@@ -4,13 +4,12 @@ import { invoke } from "@tauri-apps/api/core";
 
 // Services & Stores
 import { registry } from "./mod-engine/Registry";
-import { workspaceManager } from "./services"; // [CHANGED]
+import { workspaceManager, p2pService } from "./services";
 import { useProjectStore } from "./stores/useProjectStore";
-import { useP2PStore } from "./stores/useP2PStore";
+import { useSessionStore } from "./stores/useSessionStore";
 import { useUIStore } from "./stores/useUIStore";
 
 // Hooks
-import { useP2P } from "./hooks/useP2P";
 import { useHostNegotiation } from "./hooks/useHostNegotiation";
 import { useAppLifecycle } from "./hooks/useAppLifecycle";
 import { useProject } from "./hooks/useProject";
@@ -24,7 +23,9 @@ import "./App.css";
 
 function App() {
   const { rootPath, currentFilePath, setCurrentFilePath, triggerFileSystemRefresh } = useProjectStore();
-  const { isHost, isJoining, isSyncing, setIsSyncing } = useP2PStore();
+  
+  // New Unified Session Store
+  const { isHost, status, statusMessage } = useSessionStore();
   const { setWarningMsg } = useUIStore();
 
   const { 
@@ -33,29 +34,28 @@ function App() {
   } = useProject();
 
   // --- 1. Workspace Coordination ---
-  // When current file changes in Store, tell Manager to open it
   useEffect(() => {
       const rel = getRelativePath(currentFilePath);
       workspaceManager.openFile(rel);
       if (currentFilePath) registry.emit('file:open', { path: currentFilePath });
-  }, [currentFilePath, rootPath]); // dependency on rootPath ensures re-calc
+  }, [currentFilePath, rootPath]); 
 
-  // --- 2. P2P & Sync ---
-  const handleFileSync = useCallback((syncedPath: string) => {
-      // UI update only
-      if (getRelativePath(currentFilePath) === syncedPath) setIsSyncing(false);
-  }, [currentFilePath, getRelativePath, setIsSyncing]);
+  // --- 2. P2P Event Bindings ---
+  // We need to bind the "project-received" event from Transport to our Project Handler
+  useEffect(() => {
+      const unsub = p2pService.on('join-accepted', (data: number[]) => {
+          handleProjectReceived(data);
+      });
+      return () => unsub();
+  }, [handleProjectReceived]);
 
-  const { sendJoinRequest, requestSync } = useP2P(handleProjectReceived, handleFileSync);
+  // Use the refactored negotiation hook (now just triggers SessionService)
+  useHostNegotiation();
   
-  // Negotiation & Lifecycle
-  useHostNegotiation(isAutoJoining, sendJoinRequest);
   const { pendingQuit, isPushing, handleQuit, handleForceQuit } = useAppLifecycle();
 
-  // --- 3. Editor Manager (View Controller) ---
-  const { editor, currentDoc } = useEditorManager(currentFilePath, isHost, isJoining);
-  
-  // Keep a ref for HostAPI
+  // --- 3. Editor Manager ---
+  const { editor, currentDoc } = useEditorManager(currentFilePath, isHost, status === 'syncing');
   const editorRef = useRef(editor);
   useEffect(() => { editorRef.current = editor; }, [editor]);
 
@@ -81,11 +81,12 @@ function App() {
             await workspaceManager.saveCurrentFile();
             registry.emit('file:save', { path: currentFilePath });
         } else {
-            // New File Creation Logic (still largely UI driven for prompts)
             const name = prompt("Enter file name (e.g., page.md):");
             if (!name) return;
             const sep = rootPath.includes("\\") ? "\\" : "/";
             const newPath = `${rootPath}${sep}${name}`;
+            
+            // For new files, we manually write first, then open
             const content = Y.encodeStateAsUpdate(currentDoc);
             await invoke("write_file_content", { path: newPath, content: Array.from(content) });
             triggerFileSystemRefresh();
@@ -112,9 +113,9 @@ function App() {
       <GlobalModalManager pendingQuit={pendingQuit} onForceQuit={handleForceQuit} />
       <MainLayout 
         editor={editor}
-        isJoining={isJoining}
+        isJoining={status === 'negotiating'}
         isPushing={isPushing}
-        isSyncing={isSyncing}
+        isSyncing={status === 'syncing'}
         onNewFile={onNewFileClick}
         onOpenFolder={handleOpenFolder}
         onSave={handleSave}

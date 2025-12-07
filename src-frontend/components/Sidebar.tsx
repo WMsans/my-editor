@@ -5,35 +5,29 @@ import { registry } from "../mod-engine/Registry";
 import { ExtensionSidebarView } from "./ExtensionSidebarView"; 
 import { SidebarWebview } from "./SidebarWebview"; 
 import { useProjectStore } from "../stores/useProjectStore";
-import { useP2PStore } from "../stores/useP2PStore";
+import { useSessionStore } from "../stores/useSessionStore"; // [CHANGED]
 import { useUIStore } from "../stores/useUIStore";
-import { p2pService } from "../services";
+import { useP2P } from "../hooks/useP2P"; // Re-using the fixed hook
 
-// No props needed!
 export const Sidebar: React.FC = () => {
   const { activeSidebarTab, setActiveSidebarTab } = useUIStore();
-  const { rootPath, setCurrentFilePath } = useProjectStore();
+  const { rootPath } = useProjectStore();
+  
+  // [CHANGED] Use SessionStore
   const { 
-    isHost, status, incomingRequest, 
-    setIncomingRequest, setStatus 
-  } = useP2PStore();
+    isHost, statusMessage, incomingRequest
+  } = useSessionStore();
+
+  const { acceptRequest, rejectRequest } = useP2P();
 
   const [width, setWidth] = useState(250);
   const [isResizing, setIsResizing] = useState(false);
 
-  // Actions wrapped here or imported from p2p logic if complex
   const handleAcceptRequest = async () => {
-      if(!incomingRequest || !rootPath) return;
-      try {
-        await p2pService.approveJoin(incomingRequest, rootPath);
-        setIncomingRequest(null);
-        setStatus(`Accepted ${incomingRequest.slice(0, 8)}. Sending folder...`);
-      } catch (e) {
-        setStatus("Error: " + e);
-      }
+      if (rootPath) await acceptRequest(rootPath);
   };
 
-  const handleRejectRequest = () => setIncomingRequest(null);
+  const handleRejectRequest = () => rejectRequest();
 
   // Resize Logic
   const startResizing = useCallback(() => setIsResizing(true), []);
@@ -73,7 +67,7 @@ export const Sidebar: React.FC = () => {
       return (
         <div className="p2p-panel">
           <h3>P2P Status: {isHost ? "Host" : "Guest"}</h3>
-          <p className="status-text">{status}</p>
+          <p className="status-text">{statusMessage}</p>
           {incomingRequest && (
             <IncomingRequest 
               peerId={incomingRequest} 
