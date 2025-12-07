@@ -144,6 +144,7 @@ export interface HostAPI {
       registerWebviewView: (viewId: string, options: WebviewViewOptions) => WebviewView;
       createTopbarItem: (options: TopbarItemOptions) => TopbarItemControl;
       showInformationMessage: (message: string, ...items: string[]) => Promise<string | undefined>;
+      showInputBox: (options?: { prompt?: string, value?: string }) => Promise<string | undefined>; // [NEW]
   };
   
   editor: {

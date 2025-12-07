@@ -46,6 +46,7 @@ export class WorkerClient {
             // Route to correct API namespace
             if (module === 'data.fs') target = this.api.data.fs;
             else if (module === 'ui') target = this.api.ui;
+            else if (module === 'window') target = this.api.window; // [NEW] Added window
             else if (module === 'commands') target = this.api.commands;
             else if (module === 'plugins') target = this.api.plugins;
             else if (module === 'editor') target = this.api.editor; 

@@ -73,7 +73,8 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
                     } 
                 };
             },
-            showInformationMessage: (msg) => rpc.request('api:call', { module: 'ui', method: 'showNotification', args: [msg] })
+            showInformationMessage: (msg) => rpc.request('api:call', { module: 'ui', method: 'showNotification', args: [msg] }),
+            showInputBox: (options) => rpc.request('api:call', { module: 'window', method: 'showInputBox', args: [options] })
         },
         commands: {
             registerCommand: (id, handler) => {

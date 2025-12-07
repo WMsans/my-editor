@@ -6,6 +6,7 @@ import { pluginEventBus } from "../PluginEventBus";
 import { fsService, workspaceManager } from "../../core/services";
 import * as Y from "yjs";
 import { createWebviewBlockExtension } from "../../ui/features/sidebar/WebviewBlock";
+import { useUIStore } from "../../core/stores/useUIStore";
 
 const resolvePath = (path: string, root: string | null): string => {
     if (!root) return path; 
@@ -53,6 +54,9 @@ export const createHostAPI = (
       showInformationMessage: async (message) => {
         setWarningMsg(message);
         return undefined;
+      },
+      showInputBox: async (options) => {
+        return useUIStore.getState().requestInput(options?.prompt || "Input required", options?.value) as Promise<string | undefined>;
       }
     },
 
