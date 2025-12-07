@@ -1,4 +1,4 @@
-import { Node, Extension } from "@tiptap/core";
+import { Node, Extension, Mark } from "@tiptap/core";
 import { Editor } from "@tiptap/react";
 import { EditorState } from "@tiptap/pm/state";
 import * as Y from "yjs";
@@ -92,6 +92,13 @@ export interface WebviewView {
     dispose(): void;
 }
 
+export interface BubbleItemOptions {
+    id: string;
+    icon: string;    // Symbol or short text
+    command: string; // Command ID to execute
+    tooltip?: string;
+    pluginId?: string;
+}
 
 // --- Contribution Types ---
 
@@ -140,7 +147,7 @@ export interface HostAPI {
   };
   
   editor: {
-    registerExtension: (ext: Node | Extension, options?: { priority?: 'high' | 'normal' }) => void;
+    registerExtension: (ext: Node | Extension | Mark, options?: { priority?: 'high' | 'normal' }) => void;
     registerWebviewBlock: (id: string, options: { 
       initialHtml?: string; 
       initialScript?: string; 
@@ -148,6 +155,7 @@ export interface HostAPI {
       attributes?: Record<string, any>;
       pluginId?: string; 
     }) => void;
+    registerBubbleItem: (options: { id: string; icon: string; command: string; tooltip?: string }) => void; // [NEW]
     insertContent: (content: any) => void;
     insertContentAt: (range: { from: number; to: number }, content: any) => void; 
     getCommands: () => any; 

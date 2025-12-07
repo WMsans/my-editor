@@ -87,6 +87,7 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
         editor: {
             registerExtension: () => {},
             registerWebviewBlock: (id, options) => rpc.request('ui:webviewBlock', { id, options, pluginId }),
+            registerBubbleItem: (options) => rpc.request('ui:bubbleItem', { options, pluginId }),
             insertContent: (content) => rpc.request('api:call', { module: 'editor', method: 'insertContent', args: [content] }),
             insertContentAt: (range, content) => rpc.request('api:call', { module: 'editor', method: 'insertContentAt', args: [range, content] }),
             getCommands: () => ({}),

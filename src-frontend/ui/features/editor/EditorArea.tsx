@@ -1,7 +1,9 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { EditorContent, Editor } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import { SlashMenu } from "./SlashMenu";
+import { registry } from "../../../engine/registry/Registry";
+import { commandService } from "../../../engine/api/CommandService";
 
 interface EditorAreaProps {
   editor: Editor | null;
@@ -16,6 +18,20 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
   isPushing, 
   isSyncing 
 }) => {
+  // Subscribe to registry bubble items
+  const [bubbleItems, setBubbleItems] = useState(registry.getBubbleItems());
+
+  useEffect(() => {
+    // Initial fetch
+    setBubbleItems([...registry.getBubbleItems()]);
+
+    // Listen
+    const unsub = registry.subscribe(() => {
+      setBubbleItems([...registry.getBubbleItems()]);
+    });
+    return unsub;
+  }, []);
+
   return (
     <main className="editor-container">
       {(isSyncing || isPushing) && (
@@ -37,21 +53,35 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
             <button 
               onClick={() => editor.chain().focus().toggleBold().run()} 
               className={editor.isActive('bold') ? 'is-active' : ''}
+              title="Bold"
             >
-              Bold
+              𝐁
             </button>
             <button 
               onClick={() => editor.chain().focus().toggleItalic().run()} 
               className={editor.isActive('italic') ? 'is-active' : ''}
+              title="Italic"
             >
-              Italic
+              𝐼
             </button>
             <button 
               onClick={() => editor.chain().focus().toggleCode().run()} 
               className={editor.isActive('code') ? 'is-active' : ''}
+              title="Code"
             >
-              Code
+              {'</>'}
             </button>
+            
+            {/* Dynamic Plugin Items */}
+            {bubbleItems.map(item => (
+              <button
+                key={item.id}
+                onClick={() => commandService.executeCommand(item.command)}
+                title={item.tooltip}
+              >
+                {item.icon}
+              </button>
+            ))}
           </BubbleMenu>
         )}
         <EditorContent editor={editor} />

@@ -67,6 +67,9 @@ export const createHostAPI = (
          const ext = createWebviewBlockExtension({ id, ...options });
          registry.registerExtension(ext);
       },
+      registerBubbleItem: (options) => {
+         registry.registerBubbleItem({ ...options, pluginId: 'host-local' });
+      },
       insertContent: (content) => {
         getEditor()?.chain().focus().insertContent(content).run();
       },
@@ -119,7 +122,8 @@ export const createScopedAPI = (baseApi: HostAPI, pluginId: string, permissions:
     },
     editor: {
         ...baseApi.editor,
-        registerWebviewBlock: (id, options) => baseApi.editor.registerWebviewBlock(id, { ...options, pluginId })
+        registerWebviewBlock: (id, options) => baseApi.editor.registerWebviewBlock(id, { ...options, pluginId }),
+        registerBubbleItem: (options) => registry.registerBubbleItem({ ...options, pluginId })
     },
     data: {
       ...baseApi.data,

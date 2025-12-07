@@ -79,6 +79,11 @@ export class WorkerClient {
                 registry.updateTopbarItem(payload.id, payload.options);
             }
         });
+        
+        // Bubble Menu
+        this.rpc.register('ui:bubbleItem', (payload: any) => {
+            registry.registerBubbleItem({ ...payload.options, pluginId: payload.pluginId });
+        });
 
         // --- 4. Event Bus ---
         this.rpc.register('event:emit', (payload: { event: string, data: any }) => {
