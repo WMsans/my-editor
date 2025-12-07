@@ -5,7 +5,7 @@ import { CollabService } from "./CollabService";
 import { useSessionStore } from "../stores/useSessionStore";
 import { pluginLoader } from "../../engine/PluginLoader";
 import { useUIStore } from "../stores/useUIStore";
-import { useProjectStore } from "../stores/useProjectStore"; // Added missing import
+import { useProjectStore } from "../stores/useProjectStore";
 
 const META_FILE = ".collab_meta.json";
 
@@ -154,6 +154,7 @@ export class SessionService {
       const { sshKeyPath } = useProjectStore.getState();
       try {
           store.setStatus('negotiating', "Publishing session...");
+          await this.fs.gitPull(rootPath, sshKeyPath || "");
           await this.fs.pushChanges(rootPath, sshKeyPath);
       } catch (e) {
           console.error("Failed to push host metadata", e);
