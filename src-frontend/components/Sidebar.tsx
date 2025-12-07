@@ -1,19 +1,19 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { FileExplorer } from "./FileExplorer";
 import { IncomingRequest } from "./IncomingRequest";
-import { registry } from "../mod-engine/Registry";
+import { useServices } from "../contexts/ServiceContext"; // New Import
 import { ExtensionSidebarView } from "./ExtensionSidebarView"; 
 import { SidebarWebview } from "./SidebarWebview"; 
 import { useProjectStore } from "../stores/useProjectStore";
-import { useSessionStore } from "../stores/useSessionStore"; // [CHANGED]
+import { useSessionStore } from "../stores/useSessionStore"; 
 import { useUIStore } from "../stores/useUIStore";
-import { useP2P } from "../hooks/useP2P"; // Re-using the fixed hook
+import { useP2P } from "../hooks/useP2P"; 
 
 export const Sidebar: React.FC = () => {
   const { activeSidebarTab, setActiveSidebarTab } = useUIStore();
   const { rootPath } = useProjectStore();
+  const { registry } = useServices(); // Use Service
   
-  // [CHANGED] Use SessionStore
   const { 
     isHost, statusMessage, incomingRequest
   } = useSessionStore();
@@ -56,6 +56,7 @@ export const Sidebar: React.FC = () => {
     };
   }, [isResizing, resize, stopResizing]);
   
+  // Data from Service
   const pluginTabs = registry.getSidebarTabs();
   const viewContainers = registry.getViewContainers();
 

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { registry } from "../mod-engine/Registry";
 import { RegisteredTopbarItem } from "../mod-engine/types";
 import { useProjectStore } from "../stores/useProjectStore";
 import { useUIStore } from "../stores/useUIStore";
+import { useTopbar } from "../hooks/useTopbar";
 import styles from "./MenuBar.module.css"; 
 
 interface MenuBarProps {
@@ -21,24 +21,19 @@ export const MenuBar: React.FC<MenuBarProps> = ({
   const { currentFilePath } = useProjectStore();
   const { setShowSettings } = useUIStore();
   
+  // Use Custom Hook for Logic
+  const { items: extraItems } = useTopbar();
+
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
-  const [extraItems, setExtraItems] = useState<RegisteredTopbarItem[]>([]);
 
   const toggleMenu = (menu: string) => {
     setActiveMenu(activeMenu === menu ? null : menu);
   };
 
   useEffect(() => {
-    setExtraItems([...registry.getTopbarItems()]);
-    const unsubscribe = registry.subscribe(() => {
-        setExtraItems([...registry.getTopbarItems()]);
-    });
     const close = () => setActiveMenu(null);
     window.addEventListener("click", close);
-    return () => {
-        window.removeEventListener("click", close);
-        unsubscribe();
-    };
+    return () => window.removeEventListener("click", close);
   }, []);
 
   const renderItem = (item: RegisteredTopbarItem) => {

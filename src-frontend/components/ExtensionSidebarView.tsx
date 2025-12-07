@@ -1,95 +1,70 @@
 import React, { useState, useEffect } from "react";
-import { pluginLoader } from "../mod-engine/PluginLoader";
-import { commandService } from "../mod-engine/services/CommandService";
+import { useServices } from "../contexts/ServiceContext";
+import { useTreeData } from "../hooks/useTreeView";
+import { TreeNode } from "./ui/TreeNode";
 
-// --- The Recursive Node Component ---
-const GenericTreeItem: React.FC<{
+// --- Recursive Container Component ---
+const SmartTreeItem: React.FC<{
   viewId: string;
-  item: any; // Changed from TreeItem to any to handle hybrid data+UI object
+  item: any;
   depth: number;
 }> = ({ viewId, item, depth }) => {
-  const [expanded, setExpanded] = useState(
-    item.collapsibleState === "expanded"
-  );
-  const [children, setChildren] = useState<any[]>([]); // Changed to any[]
-  const [loading, setLoading] = useState(false);
+  const { commandService } = useServices();
+  const [expanded, setExpanded] = useState(item.collapsibleState === "expanded");
+  
+  // Use the hook for children data
+  const { items: children, loading, fetchData } = useTreeData(viewId, item);
 
   const isExpandable =
     item.collapsibleState === "collapsed" ||
     item.collapsibleState === "expanded";
 
-  const fetchChildren = async () => {
-    setLoading(true);
-    try {
-      // 1. Get raw data children
-      const rawChildren = await pluginLoader.requestTreeViewData(viewId, item);
-      
-      if (Array.isArray(rawChildren)) {
-        // 2. Resolve UI properties for each child
-        const resolved = await Promise.all(rawChildren.map(async (child: any) => {
-            const ui = await pluginLoader.resolveTreeItem(viewId, child);
-            // Merge raw data (for logic) with UI properties (for display)
-            return { ...child, ...(ui as any) };
-        }));
-        setChildren(resolved);
-      }
-    } catch (e) {
-      console.error("Failed to fetch tree children", e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Lazy load children when expanded
   useEffect(() => {
     if (expanded && children.length === 0 && isExpandable) {
-      fetchChildren();
+      fetchData();
     }
-  }, [expanded]);
+  }, [expanded, isExpandable]);
+
+  const handleToggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isExpandable) setExpanded(!expanded);
+  };
 
   const handleClick = () => {
-    if (isExpandable) {
-      setExpanded(!expanded);
-    }
-    // Handle Command Click
     if (item.command) {
       commandService.executeCommand(item.command.command, item.command.arguments);
+    } else {
+        // Default behavior for folders is to toggle
+        if (isExpandable) setExpanded(!expanded);
     }
   };
 
   return (
-    <div className="generic-tree-node">
-      <div
-        className="tree-label"
-        style={{ paddingLeft: `${depth * 12 + 10}px` }}
-        onClick={handleClick}
-      >
-        <span className="icon">
-          {isExpandable ? (expanded ? "📂" : "📁") : item.icon || "📄"}
-        </span>
-        <span className="text">
-            {item.label}
-            {item.description && <span className="desc">{item.description}</span>}
-        </span>
-      </div>
-      
-      {expanded && (
-        <div className="tree-children">
-            {loading && <div style={{paddingLeft: `${(depth+1)*12}px`, fontSize:'0.8em', color: '#6c7086'}}>Loading...</div>}
-            {children.map((child, idx) => (
-                <GenericTreeItem 
-                    key={child.id || idx} 
-                    viewId={viewId} 
-                    item={child} 
-                    depth={depth + 1} 
-                />
-            ))}
-        </div>
-      )}
-    </div>
+    <TreeNode
+      label={item.label}
+      icon={item.icon}
+      description={item.description}
+      depth={depth}
+      isExpandable={isExpandable}
+      isExpanded={expanded}
+      isLoading={loading}
+      onClick={handleClick}
+      onToggleExpand={handleToggle}
+    >
+      {children.map((child, idx) => (
+        <SmartTreeItem 
+          key={child.id || idx} 
+          viewId={viewId} 
+          item={child} 
+          depth={depth + 1} 
+        />
+      ))}
+    </TreeNode>
   );
 };
 
-// --- The Main View Container ---
+// --- Main View Component ---
 interface ExtensionSidebarViewProps {
   viewId: string;
   name: string;
@@ -99,34 +74,8 @@ export const ExtensionSidebarView: React.FC<ExtensionSidebarViewProps> = ({
   viewId,
   name,
 }) => {
-  const [rootItems, setRootItems] = useState<any[]>([]); // Changed to any[]
-  const [error, setError] = useState<string | null>(null);
-
-  // Initial Load (Root Level)
-  useEffect(() => {
-    let mounted = true;
-    const loadRoot = async () => {
-      try {
-        // 1. Fetch root raw objects
-        const rawRoots = await pluginLoader.requestTreeViewData(viewId);
-        
-        if (mounted) {
-            if (Array.isArray(rawRoots)) {
-                // 2. Resolve UI properties
-                const resolved = await Promise.all(rawRoots.map(async (child: any) => {
-                    const ui = await pluginLoader.resolveTreeItem(viewId, child);
-                    return { ...child, ...(ui as any) };
-                }));
-                setRootItems(resolved);
-            }
-        }
-      } catch (e: any) {
-        if (mounted) setError(e.toString());
-      }
-    };
-    loadRoot();
-    return () => { mounted = false; };
-  }, [viewId]);
+  // Use hook for root items (undefined parent)
+  const { items: rootItems, loading, error } = useTreeData(viewId, undefined);
 
   return (
     <div className="extension-view">
@@ -144,12 +93,16 @@ export const ExtensionSidebarView: React.FC<ExtensionSidebarViewProps> = ({
       <div className="view-content" style={{ padding: '5px 0' }}>
         {error && <div className="error-msg" style={{color: '#f38ba8', padding: '10px'}}>{error}</div>}
         
-        {rootItems.length === 0 && !error && (
+        {loading && rootItems.length === 0 && (
+            <div style={{padding: '10px', color: '#6c7086'}}>Loading view...</div>
+        )}
+
+        {!loading && rootItems.length === 0 && !error && (
             <div className="sidebar-empty">No items provided by plugin.</div>
         )}
 
         {rootItems.map((item, idx) => (
-          <GenericTreeItem 
+          <SmartTreeItem 
             key={item.id || idx} 
             viewId={viewId} 
             item={item} 
