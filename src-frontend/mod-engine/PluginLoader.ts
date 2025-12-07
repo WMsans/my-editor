@@ -57,8 +57,8 @@ class LocalPluginController implements PluginController {
           }
         };
 
-        const runPlugin = new Function("exports", "require", "module", "code", this.code);
-        runPlugin(exports, syntheticRequire, module, this.code);
+        const runPlugin = new Function("exports", "require", "module", "api", this.code);
+        runPlugin(exports, syntheticRequire, module, interceptedApi);
 
         this.instance = module.exports || exports;
         if (this.instance.activate) {

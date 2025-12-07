@@ -48,6 +48,7 @@ export class WorkerClient {
             else if (module === 'ui') target = this.api.ui;
             else if (module === 'commands') target = this.api.commands;
             else if (module === 'plugins') target = this.api.plugins;
+            else if (module === 'editor') target = this.api.editor; 
             
             if (target && typeof target[method] === 'function') {
                 return await target[method](...args);

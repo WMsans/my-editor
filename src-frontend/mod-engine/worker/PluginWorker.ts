@@ -43,19 +43,29 @@ const createWorkerAPI = (pluginId: string): HostAPI => {
                 return { update: () => {}, dispose: () => {} };
             },
             createTopbarItem: (options) => {
-                // Store options locally to keep the callback references (onClick, onChange)
+                // 1. Store options locally to keep the callback references (onClick, onChange)
                 topbarItems.set(options.id, options);
 
-                // Send registration to main thread (callbacks won't serialize, but ID maps them back)
-                rpc.request('ui:topbar', { action: 'register', id: options.id, pluginId, options });
+                // 2. FIX: Strip functions (onClick, onChange) before sending to main thread
+                //    RPC/postMessage cannot clone functions.
+                const { onClick, onChange, ...serializableOptions } = options;
+
+                // Send registration to main thread
+                rpc.request('ui:topbar', { 
+                    action: 'register', 
+                    id: options.id, 
+                    pluginId, 
+                    options: serializableOptions 
+                });
                 
                 return {
                     update: (opts) => {
-                        // Update local cache
                         const existing = topbarItems.get(options.id);
                         if (existing) Object.assign(existing, opts);
 
-                        rpc.request('ui:topbar', { action: 'update', id: options.id, options: opts });
+                        // Ensure we sanitize updates too if they might contain functions
+                        const { onClick, onChange, ...safeOpts } = opts as any; 
+                        rpc.request('ui:topbar', { action: 'update', id: options.id, options: safeOpts });
                     },
                     dispose: () => {
                         topbarItems.delete(options.id);

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { WebviewViewOptions } from "../mod-engine/types";
 import { registry } from "../mod-engine/Registry";
+import { commandService } from "../mod-engine/services/CommandService";
 
 interface SidebarWebviewProps {
     viewId: string;
@@ -14,9 +15,6 @@ export const SidebarWebview: React.FC<SidebarWebviewProps> = ({ viewId, options 
         const iframe = iframeRef.current;
         if (!iframe) return;
 
-        // --- 1. Outbound Bridge: Host -> Webview ---
-        // Subscribe to global registry events and forward them to the iframe.
-        // We capture the 'Disposable' object returned by subscribeToAll.
         const subscription = registry.subscribeToAll((event, data) => {
             if (iframe.contentWindow) {
                 iframe.contentWindow.postMessage({
@@ -27,22 +25,19 @@ export const SidebarWebview: React.FC<SidebarWebviewProps> = ({ viewId, options 
             }
         });
 
-        // --- 2. Inbound Bridge: Webview -> Host ---
         const handleMessage = (e: MessageEvent) => {
-            // Security/Context Check
             if (e.source !== iframe.contentWindow) return;
 
             const msg = e.data;
             if (!msg || typeof msg !== 'object') return;
 
             if (msg.command === 'executeCommand') {
-                registry.executeCommand(msg.id, msg.args);
+                commandService.executeCommand(msg.id, msg.args);
             }
         };
 
         window.addEventListener('message', handleMessage);
 
-        // --- 3. Initialize Webview Content ---
         if (options.entryPoint && options.pluginId) {
             iframe.src = `plugin://${options.pluginId}/${options.entryPoint}`;
         } else if (options.initialHtml) {
@@ -66,7 +61,6 @@ export const SidebarWebview: React.FC<SidebarWebviewProps> = ({ viewId, options 
             iframe.srcdoc = docContent;
         }
 
-        // Cleanup
         return () => {
             subscription.dispose();
             window.removeEventListener('message', handleMessage);

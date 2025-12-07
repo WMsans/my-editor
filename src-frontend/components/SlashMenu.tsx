@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Editor } from "@tiptap/react";
 import { registry } from "../mod-engine/Registry";
+import { commandService } from "../mod-engine/services/CommandService";
 
 interface SlashMenuProps {
   editor: Editor;
@@ -10,6 +11,8 @@ export const SlashMenu: React.FC<SlashMenuProps> = ({ editor }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const [selectedIndex, setSelectedIndex] = useState(0);
+  
+  // Registry is still used to GET data (Database pattern)
   const items = registry.getAllSlashCommands();
 
   useEffect(() => {
@@ -48,9 +51,7 @@ export const SlashMenu: React.FC<SlashMenuProps> = ({ editor }) => {
         to: editor.state.selection.from 
     };
     
-    // Execute the command via registry dynamically
-    // The command handler (worker or main) is responsible for replacing this range.
-    registry.executeCommand(cmdDef.command, { range });
+    commandService.executeCommand(cmdDef.command, { range });
     
     setIsOpen(false);
   };
